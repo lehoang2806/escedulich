@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './SocialMedia.css';
-import { getAllPosts, createPost as apiCreatePost, createComment as apiCreateComment, createReaction as apiCreateReaction, deleteReaction as apiDeleteReaction, getCurrentUser, getCommentsByPostId, deletePost as apiDeletePost, deleteComment as apiDeleteComment, savePost as apiSavePost, unsavePost as apiUnsavePost, updatePost as apiUpdatePost, updateComment as apiUpdateComment, getPostById as apiGetPostById, getSavedPostIds as apiGetSavedPostIds } from '../API/SocialMediaApi';
+import { getAllPosts, createPost as apiCreatePost, createComment as apiCreateComment, createReaction as apiCreateReaction, deleteReaction as apiDeleteReaction, getCurrentUser, getCommentsByPostId, deletePost as apiDeletePost, deleteComment as apiDeleteComment, savePost as apiSavePost, unsavePost as apiUnsavePost, updatePost as apiUpdatePost, updateComment as apiUpdateComment, getPostById as apiGetPostById, getSavedPostIds as apiGetSavedPostIds } from '../api/SocialMediaApi';
 import Header from './Header';
 import Sidebar from './Sidebar';
 

@@ -1,9 +1,9 @@
 import './CreateServiceCombo.css';
 import React, { useState, useEffect, useCallback } from 'react';
-import { createServiceCombo } from '../API/ServiceComboApi';
+import { createServiceCombo } from '../api/ServiceComboApi';
 import { getAllServices, addServiceToCombo } from '../API/ServiceApi';
 import Header from './Header';
-import { getCurrentUser } from '../API/SocialMediaApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
 
 const CreateServiceCombo = () => {
    // State management

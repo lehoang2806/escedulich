@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { getMyServiceCombos, deleteServiceCombo, getServiceComboById } from '../API/ServiceComboApi';
 import Header from './Header';
 import Sidebar from './Sidebar';
-import { getCurrentUser } from '../API/SocialMediaApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
 
 // Dùng cùng domain với API deploy
 const backend_url = import.meta.env.VITE_API_URL
@@ -11,7 +11,7 @@ const backend_url = import.meta.env.VITE_API_URL
   : window.location.origin;
 // Default image from Firebase Storage
 const DEFAULT_IMAGE_URL = 'https://firebasestorage.googleapis.com/v0/b/esce-a4b58.firebasestorage.app/o/default%2Fstock_nimg.jpg?alt=media&token=623cc75c-6625-4d18-ab1e-ff5ca18b49a1';
-import { deleteService } from '../API/ServiceApi';
+import { deleteService } from '../api/ServiceApi';
 
 const ServiceComboManager = () => {
   const [sidebarActive, setSidebarActive] = useState(false);

@@ -1,9 +1,9 @@
 import './EditCoupon.css';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getCouponById, updateCoupon } from '../API/CouponApi';
+import { getCouponById, updateCoupon } from '../api/CouponApi';
 import Header from './Header';
-import { getCurrentUser } from '../API/SocialMediaApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
 
 const EditCoupon = () => {
   // State management - matching database schema

@@ -1,9 +1,9 @@
 import './EditServiceCombo.css';
 import React, { useState, useEffect, useCallback } from 'react';
-import { updateServiceCombo, getServiceComboById } from '../API/ServiceComboApi';
+import { updateServiceCombo, getServiceComboById } from '../api/ServiceComboApi';
 import { getAllServices, addServiceToCombo, getServiceComboDetailsByComboId, deleteServiceComboDetail, updateServiceComboDetail } from '../API/ServiceApi';
 import Header from './Header';
-import { getCurrentUser } from '../API/SocialMediaApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
 
 // Dùng cùng domain với API deploy
 const backend_url = import.meta.env.VITE_API_URL
