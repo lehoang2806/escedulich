@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type JSX } from 'react'
 import { AlertCircleIcon } from './icons/index'
 import type { MembershipTier, ComplementaryService } from '~/types/membership'
 import { getBonusServicesByHost } from '~/api/user/BonusServiceApi'
@@ -62,6 +62,7 @@ interface ComplementaryServicesProps {
   hostId?: number
   onServicesLoaded?: (services: ExtendedComplementaryService[]) => void
   maxSelectable?: number // Số lượng tối đa được chọn (theo số lượng gói đã đặt)
+  comboDescription?: string // Description của combo chứa [COMBO_PROMOTIONS:1,2,3]
 }
 
 const ComplementaryServices = ({
@@ -71,7 +72,8 @@ const ComplementaryServices = ({
   disabled = false,
   hostId,
   onServicesLoaded,
-  maxSelectable: maxSelectableProp
+  maxSelectable: maxSelectableProp,
+  comboDescription
 }: ComplementaryServicesProps) => {
   const [allServices, setAllServices] = useState<ExtendedComplementaryService[]>([])
   const [eligibleCount, setEligibleCount] = useState(0)
@@ -89,8 +91,32 @@ const ComplementaryServices = ({
         const bonusServices = await getBonusServicesByHost(hostId)
         const userLevelNum = tierToLevelNumber[userTier]
 
+        // Parse allowed promotion IDs from combo description
+        let allowedPromotionIds: number[] | null = null
+        if (comboDescription) {
+          const promotionMatch = comboDescription.match(/\[COMBO_PROMOTIONS:([^\]]*)\]/)
+          if (promotionMatch && promotionMatch[1]) {
+            allowedPromotionIds = promotionMatch[1].split(',').map((id: string) => parseInt(id.trim())).filter((id: number) => !isNaN(id))
+            console.log('[ComplementaryServices] Loaded allowed promotions from description:', allowedPromotionIds)
+          }
+        }
+
+        // Filter bonus services by allowed promotion IDs
+        // - Nếu có tag [COMBO_PROMOTIONS:...] với IDs → chỉ hiển thị những ưu đãi đó
+        // - Nếu có tag nhưng rỗng → không hiển thị ưu đãi nào
+        // - Nếu không có tag → hiển thị tất cả ưu đãi của Host
+        let filteredBonusServices = bonusServices
+        if (allowedPromotionIds !== null) {
+          if (allowedPromotionIds.length > 0) {
+            filteredBonusServices = bonusServices.filter(bs => allowedPromotionIds!.includes(bs.Id))
+          } else {
+            filteredBonusServices = [] // Tag rỗng = không có ưu đãi
+          }
+        }
+        // Nếu allowedPromotionIds === null (không có tag) → giữ nguyên tất cả bonusServices
+
         // Process all bonus services
-        const processedServices: ExtendedComplementaryService[] = bonusServices.map(bs => {
+        const processedServices: ExtendedComplementaryService[] = filteredBonusServices.map(bs => {
           let isEligible = false
           let requiredLevel: string | undefined
           let requiredUserType: string | undefined
@@ -225,7 +251,7 @@ const ComplementaryServices = ({
     }
 
     fetchBonusServices()
-  }, [userTier, hostId])
+  }, [userTier, hostId, comboDescription])
 
   // Reset selection if services change
   useEffect(() => {

@@ -22,6 +22,8 @@ import {
 import axiosInstance from '~/utils/axiosInstance'
 import { API_ENDPOINTS } from '~/config/api'
 import { getImageUrl } from '~/lib/utils'
+import { getApprovedTime } from '~/api/instances/PostApprovalApi'
+import { getAllApprovalTimesFromFirestore } from '~/services/postApprovalService'
 import './ForumPage.css'
 
 interface UserInfo {
@@ -170,8 +172,11 @@ const ForumPage = () => {
   const [showCommentMenu, setShowCommentMenu] = useState<Record<string, boolean>>({}) // key: postId-commentId
   const [showLikersModal, setShowLikersModal] = useState<Post | null>(null) // Modal danh sách người thích bài viết
   const [showCommentLikersModal, setShowCommentLikersModal] = useState<PostComment | null>(null) // Modal danh sách người thích comment
-  const [deleteCommentConfirm, setDeleteCommentConfirm] = useState<{postId: string, commentId: string} | null>(null) // Modal xác nhận xóa comment
-  const [deletePostConfirm, setDeletePostConfirm] = useState<string | null>(null) // Modal xác nhận xóa bài viết (postId)
+  const [deleteCommentConfirm, setDeleteCommentConfirm] = useState<{postId: string, commentId: string, commentAuthorId?: number, isOwnContent?: boolean} | null>(null) // Modal xác nhận xóa comment
+  const [deletePostConfirm, setDeletePostConfirm] = useState<{postId: string, postAuthorId?: number, isOwnContent?: boolean} | null>(null) // Modal xác nhận xóa bài viết
+  const [deleteReason, setDeleteReason] = useState('') // Lý do xóa (khi xóa của người khác)
+  const [deleteReasonError, setDeleteReasonError] = useState('')
+  const [approvalTimesCache, setApprovalTimesCache] = useState<Record<string, string>>({}) // Cache approval times từ Firestore
 
   // Cache key cho posts
   const POSTS_CACHE_KEY = 'forum_posts_cache'
@@ -206,6 +211,20 @@ const ForumPage = () => {
       console.error('Error saving cached posts:', e)
     }
   }
+
+  // Load approval times từ Firestore khi component mount
+  useEffect(() => {
+    const loadApprovalTimes = async () => {
+      try {
+        const times = await getAllApprovalTimesFromFirestore()
+        setApprovalTimesCache(times)
+        console.log('[ForumPage] Loaded approval times from Firestore:', Object.keys(times).length, 'posts')
+      } catch (error) {
+        console.error('[ForumPage] Error loading approval times:', error)
+      }
+    }
+    loadApprovalTimes()
+  }, [])
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -242,6 +261,39 @@ const ForumPage = () => {
         console.error('Error parsing userInfo:', err)
       }
     }
+  }
+
+  // Helper: Kiểm tra xem đây có phải là content của chính mình không
+  const isOwnContent = (authorId: number | string | undefined) => {
+    if (!userInfo) return false
+    const userId = userInfo.Id || userInfo.id || 0
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
+    const authorIdNum = typeof authorId === 'string' ? parseInt(authorId, 10) : Number(authorId || 0)
+    return userIdNum === authorIdNum && userIdNum > 0
+  }
+
+  // Helper: Kiểm tra xem user có phải là Admin không
+  const isAdmin = () => {
+    if (!userInfo) return false
+    const roleId = userInfo.RoleId || userInfo.roleId || 0
+    return roleId === 1
+  }
+
+  // Helper: Kiểm tra xem user có thể xóa comment không (chủ comment, chủ bài, hoặc Admin)
+  const canDeleteComment = (comment: PostComment, post: Post) => {
+    if (!userInfo) return false
+    
+    // Admin có thể xóa bất kỳ comment nào
+    if (isAdmin()) return true
+    
+    // Chủ comment có thể xóa comment của mình
+    if (isOwnContent(comment.AuthorId)) return true
+    
+    // Chủ bài post có thể xóa comment trong bài của mình
+    const postAuthorId = post.PosterId || post.AuthorId
+    if (isOwnContent(postAuthorId)) return true
+    
+    return false
   }
 
   // Reaction types: 1=Like, 2=Love, 3=Haha, 4=Wow, 5=Sad, 6=Angry
@@ -313,22 +365,33 @@ const ForumPage = () => {
       }
     })
 
-    // Sắp xếp theo thời gian tạo (cũ nhất trước)
+    // Hàm đệ quy để sắp xếp replies ở tất cả các cấp (replies giữ thứ tự cũ -> mới để dễ đọc)
+    const sortRepliesRecursive = (comments: PostComment[]) => {
+      comments.sort((a, b) => {
+        const dateA = a.CreatedDate ? new Date(a.CreatedDate).getTime() : 0
+        const dateB = b.CreatedDate ? new Date(b.CreatedDate).getTime() : 0
+        return dateA - dateB // Replies: cũ nhất trước để dễ theo dõi cuộc hội thoại
+      })
+      
+      comments.forEach(comment => {
+        if (comment.Replies && comment.Replies.length > 0) {
+          sortRepliesRecursive(comment.Replies)
+        }
+      })
+    }
+
+    // Sắp xếp replies (cũ nhất trước để dễ theo dõi cuộc hội thoại)
+    topLevelComments.forEach(comment => {
+      if (comment.Replies && comment.Replies.length > 0) {
+        sortRepliesRecursive(comment.Replies)
+      }
+    })
+
+    // Sắp xếp top-level comments: MỚI NHẤT LÊN ĐẦU
     topLevelComments.sort((a, b) => {
       const dateA = a.CreatedDate ? new Date(a.CreatedDate).getTime() : 0
       const dateB = b.CreatedDate ? new Date(b.CreatedDate).getTime() : 0
-      return dateA - dateB
-    })
-
-    // Sắp xếp replies trong mỗi comment
-    topLevelComments.forEach(comment => {
-      if (comment.Replies && comment.Replies.length > 0) {
-        comment.Replies.sort((a, b) => {
-          const dateA = a.CreatedDate ? new Date(a.CreatedDate).getTime() : 0
-          const dateB = b.CreatedDate ? new Date(b.CreatedDate).getTime() : 0
-          return dateA - dateB
-        })
-      }
+      return dateB - dateA // Mới nhất lên đầu
     })
 
     return topLevelComments
@@ -1027,22 +1090,36 @@ const ForumPage = () => {
     }
   }
 
-  const handleDeletePost = async (postId: string) => {
+  const handleDeletePost = async (postId: string, postAuthorId?: number | string) => {
     if (!userInfo) return
 
-    // Hiển thị modal xác nhận thay vì xóa trực tiếp
-    setDeletePostConfirm(postId)
+    // Kiểm tra xem có phải xóa bài của chính mình không
+    const isOwn = isOwnContent(postAuthorId)
+
+    // Hiển thị modal xác nhận
+    setDeletePostConfirm({ postId, postAuthorId: typeof postAuthorId === 'string' ? parseInt(postAuthorId, 10) : postAuthorId, isOwnContent: isOwn })
+    setDeleteReason('')
+    setDeleteReasonError('')
   }
 
   const confirmDeletePost = async () => {
     if (!deletePostConfirm) return
 
-    const postId = deletePostConfirm
+    const { postId, isOwnContent: isOwn } = deletePostConfirm
+
+    // Nếu xóa của người khác, phải có lý do
+    if (!isOwn && !deleteReason.trim()) {
+      setDeleteReasonError('Vui lòng nhập lý do xóa bài viết')
+      return
+    }
 
     try {
       setDeletingPost(postId)
       setDeletePostConfirm(null) // Đóng modal ngay
+      setDeleteReason('')
+      setDeleteReasonError('')
 
+      // TODO: Gửi deleteReason đến backend để thông báo cho người dùng
       await axiosInstance.delete(`${API_ENDPOINTS.POST}/DeletePost?id=${postId}`)
       
       // Remove from state
@@ -1481,20 +1558,23 @@ const ForumPage = () => {
 
     try {
       setSubmittingComment(postId)
-      await axiosInstance.post(API_ENDPOINTS.COMMENT, {
+      const response = await axiosInstance.post(API_ENDPOINTS.COMMENT, {
         PostId: postId, // Backend expect string
         Content: commentText,
         Images: null, // Không có ảnh trong comment input hiện tại
       })
       
-      // Optimistic update
+      // Lấy ID thực từ response (backend trả về comment vừa tạo)
+      const realCommentId = response.data?.id?.toString() || response.data?.Id?.toString() || String(Date.now())
+      
+      // Optimistic update với ID thực từ server
       const userName = userInfo.Name || userInfo.name || 'Bạn'
       const userId = userInfo.Id || userInfo.id
       setPosts((prev) =>
         prev.map((post) => {
           if (post.PostId === postId) {
             const newComment: PostComment = {
-              PostCommentId: String(Date.now()),
+              PostCommentId: realCommentId,
               FullName: userName,
               Avatar: userInfo?.Avatar || userInfo?.avatar || '',
               Content: commentText,
@@ -1517,7 +1597,7 @@ const ForumPage = () => {
         prev.map((post) => {
           if (post.PostId === postId) {
             const newComment: PostComment = {
-              PostCommentId: String(Date.now()),
+              PostCommentId: realCommentId,
               FullName: userName,
               Avatar: userInfo?.Avatar || userInfo?.avatar || '',
               Content: commentText,
@@ -1632,20 +1712,31 @@ const ForumPage = () => {
     }
   }
 
-  const handleDeleteComment = async (postId: string, commentId: string) => {
+  const handleDeleteComment = async (postId: string, commentId: string, commentAuthorId?: number) => {
     if (!userInfo) {
       navigate('/login', { state: { returnUrl: '/forum' } })
       return
     }
 
-    // Hiển thị modal xác nhận thay vì confirm()
-    setDeleteCommentConfirm({ postId, commentId })
+    // Kiểm tra xem có phải xóa comment của chính mình không
+    const isOwn = isOwnContent(commentAuthorId)
+
+    // Hiển thị modal xác nhận
+    setDeleteCommentConfirm({ postId, commentId, commentAuthorId, isOwnContent: isOwn })
+    setDeleteReason('')
+    setDeleteReasonError('')
   }
 
   const confirmDeleteComment = async () => {
     if (!deleteCommentConfirm) return
 
-    const { postId, commentId } = deleteCommentConfirm
+    const { postId, commentId, isOwnContent: isOwn } = deleteCommentConfirm
+
+    // Nếu xóa của người khác, phải có lý do
+    if (!isOwn && !deleteReason.trim()) {
+      setDeleteReasonError('Vui lòng nhập lý do xóa bình luận')
+      return
+    }
 
     // Lưu state trước khi thay đổi để revert nếu có lỗi
     const previousPosts = posts
@@ -1654,6 +1745,8 @@ const ForumPage = () => {
     try {
       setDeletingComment(commentId)
       setDeleteCommentConfirm(null) // Đóng modal ngay
+      setDeleteReason('')
+      setDeleteReasonError('')
 
       // Tìm comment và tất cả replies của nó để xóa
       const findCommentAndReplies = (comments: PostComment[], targetId: string): string[] => {
@@ -1751,6 +1844,14 @@ const ForumPage = () => {
     const replyText = replyInputs[replyKey]?.trim()
     if (!replyText) return
 
+    // Kiểm tra xem parentCommentId có phải là temporary ID không (Date.now() > 10 digits)
+    // Nếu là temporary ID, cần fetch lại để lấy ID thực từ server
+    const isTemporaryId = parentCommentId.length > 10
+    if (isTemporaryId) {
+      alert('Vui lòng đợi bình luận được lưu xong trước khi trả lời.')
+      return
+    }
+
     // Clear reply input ngay lập tức
     setReplyInputs((prev) => {
       const newInputs = { ...prev }
@@ -1762,7 +1863,7 @@ const ForumPage = () => {
       setSubmittingReply(replyKey)
 
       // Gửi reply lên server - PostCommentId là ID của comment cha
-      await axiosInstance.post(API_ENDPOINTS.COMMENT, {
+      const response = await axiosInstance.post(API_ENDPOINTS.COMMENT, {
         PostId: postId,
         Content: replyText,
         Images: null,
@@ -1776,10 +1877,67 @@ const ForumPage = () => {
         return newSet
       })
 
-      // Fetch lại posts để đồng bộ với server và build đúng comment tree
-      await fetchPosts(true)
+      // Tạo reply mới từ response hoặc từ local data
+      const newReply: PostComment = {
+        PostCommentId: response.data?.id?.toString() || response.data?.Id?.toString() || String(Date.now()),
+        FullName: userInfo.Name || userInfo.name || 'Bạn',
+        Avatar: userInfo.Avatar || userInfo.avatar || '',
+        Content: replyText,
+        CreatedDate: new Date().toISOString(),
+        Likes: [],
+        Replies: [],
+        AuthorId: userInfo.Id || userInfo.id,
+        ReactionsCount: 0,
+        ParentCommentId: parseInt(parentCommentId, 10),
+      }
+
+      // Helper function để thêm reply vào đúng comment cha (recursive)
+      const addReplyToComment = (comments: PostComment[]): PostComment[] => {
+        return comments.map((comment) => {
+          if (comment.PostCommentId === parentCommentId) {
+            // Tìm thấy comment cha, thêm reply vào
+            return {
+              ...comment,
+              Replies: [...(comment.Replies || []), newReply],
+            }
+          }
+          // Tìm trong replies (nested)
+          if (comment.Replies && comment.Replies.length > 0) {
+            return {
+              ...comment,
+              Replies: addReplyToComment(comment.Replies),
+            }
+          }
+          return comment
+        })
+      }
+
+      // Cập nhật local state thay vì fetch lại toàn bộ
+      setPosts((prevPosts) =>
+        prevPosts.map((post) => {
+          if (post.PostId === postId) {
+            return {
+              ...post,
+              Comments: addReplyToComment(post.Comments || []),
+            }
+          }
+          return post
+        })
+      )
+
+      // Cập nhật savedPosts nếu đang ở tab forum-saved
       if (activeTab === 'forum-saved') {
-        await fetchSavedPosts(true)
+        setSavedPosts((prevPosts) =>
+          prevPosts.map((post) => {
+            if (post.PostId === postId) {
+              return {
+                ...post,
+                Comments: addReplyToComment(post.Comments || []),
+              }
+            }
+            return post
+          })
+        )
       }
     } catch (err: any) {
       console.error('Error replying to comment:', err)
@@ -1799,7 +1957,8 @@ const ForumPage = () => {
 
     const userId = userInfo.Id || userInfo.id
     const userName = userInfo.Name || userInfo.name || 'Bạn'
-    console.log('User info:', { userId, userName })
+    const userAvatar = userInfo.Avatar || userInfo.avatar || ''
+    console.log('User info:', { userId, userName, userAvatar })
 
     // Lưu state trước khi thay đổi để revert nếu có lỗi
     const previousPosts = posts
@@ -1819,6 +1978,7 @@ const ForumPage = () => {
                   PostCommentLikeId: String(Date.now()),
                   AccountId: String(userId),
                   FullName: userName,
+                  Avatar: userAvatar, // Thêm avatar của người thả tim
                   CreatedDate: new Date().toISOString(),
                 }
                 return {
@@ -1940,18 +2100,29 @@ const ForumPage = () => {
     })
   }
 
-  const formatDate = (dateString: string | undefined | null) => {
+  const formatDate = (dateString: string | undefined | null, postId?: string) => {
+    // Ưu tiên sử dụng thời gian phê duyệt từ Firestore cache nếu có
+    // Để hiển thị "vừa xong" khi bài viết mới được Admin phê duyệt
+    let effectiveDate = dateString
+    if (postId) {
+      const approvedTime = getApprovedTime(postId, approvalTimesCache)
+      if (approvedTime) {
+        effectiveDate = approvedTime
+      }
+    }
+    
     // Kiểm tra dateString có hợp lệ không
-    if (!dateString || dateString.trim() === '') {
+    if (!effectiveDate || effectiveDate.trim() === '') {
       return 'Không rõ thời gian'
     }
     
     try {
       let date: Date
       
-      // Backend trả về format "dd/MM/yyyy HH:mm", cần parse thủ công
-      if (dateString.includes('/')) {
-        const parts = dateString.split(' ')
+      // Backend trả về format "dd/MM/yyyy HH:mm" hoặc ISO format
+      if (effectiveDate.includes('/')) {
+        // Format "dd/MM/yyyy HH:mm" - backend lưu local time (Vietnam UTC+7)
+        const parts = effectiveDate.split(' ')
         const dateParts = parts[0].split('/')
         if (dateParts.length === 3) {
           const day = parseInt(dateParts[0], 10)
@@ -1962,16 +2133,24 @@ const ForumPage = () => {
             const timeParts = parts[1].split(':')
             const hours = parseInt(timeParts[0], 10)
             const minutes = parseInt(timeParts[1], 10)
+            // Tạo date với local time vì backend lưu local time (DateTime.Now)
             date = new Date(year, month, day, hours, minutes)
           } else {
             date = new Date(year, month, day)
           }
         } else {
-          date = new Date(dateString)
+          date = new Date(effectiveDate)
         }
       } else {
-        // ISO format hoặc format khác
-        date = new Date(dateString)
+        // ISO format - backend có thể trả về ISO format
+        // Nếu không có timezone indicator ('Z' hoặc '+'), thêm 'Z' để parse như UTC
+        // vì backend C# DateTime.Now.ToString() không có timezone
+        if (!effectiveDate.endsWith('Z') && !effectiveDate.includes('+') && !effectiveDate.includes('-', 10)) {
+          // Không có timezone indicator -> coi như UTC và convert sang local
+          date = new Date(effectiveDate + 'Z')
+        } else {
+          date = new Date(effectiveDate)
+        }
       }
       
       // Kiểm tra date có hợp lệ không
@@ -1985,6 +2164,8 @@ const ForumPage = () => {
       const diffHours = Math.floor(diffMs / 3600000)
       const diffDays = Math.floor(diffMs / 86400000)
 
+      // Xử lý trường hợp thời gian trong tương lai (do lệch timezone)
+      if (diffMins < 0) return 'Vừa xong'
       if (diffMins < 1) return 'Vừa xong'
       if (diffMins < 60) return `${diffMins} phút trước`
       if (diffHours < 24) return `${diffHours} giờ trước`
@@ -2000,7 +2181,26 @@ const ForumPage = () => {
     }
   }
 
-  const displayPosts = activeTab === 'featured' ? posts : savedPosts
+  // Sort posts by approved time (from Firestore cache) or PublicDate - newest first
+  // Bài viết mới duyệt sẽ hiển thị lên đầu
+  const sortedPosts = [...posts].sort((a, b) => {
+    // Ưu tiên thời gian phê duyệt từ Firestore cache
+    const approvedTimeA = a.PostId ? getApprovedTime(a.PostId, approvalTimesCache) : null
+    const approvedTimeB = b.PostId ? getApprovedTime(b.PostId, approvalTimesCache) : null
+    const dateA = new Date(approvedTimeA || a.PublicDate || a.CreatedAt || 0).getTime()
+    const dateB = new Date(approvedTimeB || b.PublicDate || b.CreatedAt || 0).getTime()
+    return dateB - dateA // Newest first
+  })
+  
+  const sortedSavedPosts = [...savedPosts].sort((a, b) => {
+    const approvedTimeA = a.PostId ? getApprovedTime(a.PostId, approvalTimesCache) : null
+    const approvedTimeB = b.PostId ? getApprovedTime(b.PostId, approvalTimesCache) : null
+    const dateA = new Date(approvedTimeA || a.PublicDate || a.CreatedAt || 0).getTime()
+    const dateB = new Date(approvedTimeB || b.PublicDate || b.CreatedAt || 0).getTime()
+    return dateB - dateA // Newest first
+  })
+
+  const displayPosts = activeTab === 'featured' ? sortedPosts : sortedSavedPosts
 
   // Post Card Skeleton Component
   const PostCardSkeleton = () => {
@@ -2384,17 +2584,43 @@ const ForumPage = () => {
 
       {/* Modal xác nhận xóa bình luận */}
       {deleteCommentConfirm && (
-        <div className="forum-forum-modal-overlay" onClick={() => setDeleteCommentConfirm(null)}>
-          <div className="forum-forum-confirm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="forum-forum-modal-overlay" onClick={() => {
+          setDeleteCommentConfirm(null)
+          setDeleteReason('')
+          setDeleteReasonError('')
+        }}>
+          <div className="forum-forum-confirm-modal forum-forum-confirm-modal-wide" onClick={(e) => e.stopPropagation()}>
             <div className="forum-forum-confirm-modal-icon">🗑️</div>
             <h3 className="forum-forum-confirm-modal-title">Xóa bình luận</h3>
             <p className="forum-forum-confirm-modal-message">
               Bạn có chắc chắn muốn xóa bình luận này? Hành động này không thể hoàn tác.
             </p>
+            {/* Hiển thị input lý do nếu xóa comment của người khác */}
+            {!deleteCommentConfirm.isOwnContent && (
+              <div className="forum-forum-delete-reason-container">
+                <textarea
+                  className={`forum-forum-delete-reason-input ${deleteReasonError ? 'forum-forum-delete-reason-input-error' : ''}`}
+                  placeholder="Nhập lý do xóa bình luận để thông báo cho người dùng... *"
+                  value={deleteReason}
+                  onChange={(e) => {
+                    setDeleteReason(e.target.value)
+                    setDeleteReasonError('')
+                  }}
+                  rows={3}
+                />
+                {deleteReasonError && (
+                  <span className="forum-forum-delete-reason-error">{deleteReasonError}</span>
+                )}
+              </div>
+            )}
             <div className="forum-forum-confirm-modal-actions">
               <button 
                 className="forum-forum-confirm-modal-btn forum-forum-confirm-modal-btn-cancel"
-                onClick={() => setDeleteCommentConfirm(null)}
+                onClick={() => {
+                  setDeleteCommentConfirm(null)
+                  setDeleteReason('')
+                  setDeleteReasonError('')
+                }}
               >
                 Hủy
               </button>
@@ -2411,17 +2637,43 @@ const ForumPage = () => {
 
       {/* Modal xác nhận xóa bài viết */}
       {deletePostConfirm && (
-        <div className="forum-forum-modal-overlay" onClick={() => setDeletePostConfirm(null)}>
-          <div className="forum-forum-confirm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="forum-forum-modal-overlay" onClick={() => {
+          setDeletePostConfirm(null)
+          setDeleteReason('')
+          setDeleteReasonError('')
+        }}>
+          <div className="forum-forum-confirm-modal forum-forum-confirm-modal-wide" onClick={(e) => e.stopPropagation()}>
             <div className="forum-forum-confirm-modal-icon">🗑️</div>
             <h3 className="forum-forum-confirm-modal-title">Xóa bài viết</h3>
             <p className="forum-forum-confirm-modal-message">
               Bạn có chắc chắn muốn xóa bài viết này? Tất cả bình luận và phản ứng cũng sẽ bị xóa. Hành động này không thể hoàn tác.
             </p>
+            {/* Hiển thị input lý do nếu xóa bài của người khác */}
+            {!deletePostConfirm.isOwnContent && (
+              <div className="forum-forum-delete-reason-container">
+                <textarea
+                  className={`forum-forum-delete-reason-input ${deleteReasonError ? 'forum-forum-delete-reason-input-error' : ''}`}
+                  placeholder="Nhập lý do xóa bài viết để thông báo cho người dùng... *"
+                  value={deleteReason}
+                  onChange={(e) => {
+                    setDeleteReason(e.target.value)
+                    setDeleteReasonError('')
+                  }}
+                  rows={3}
+                />
+                {deleteReasonError && (
+                  <span className="forum-forum-delete-reason-error">{deleteReasonError}</span>
+                )}
+              </div>
+            )}
             <div className="forum-forum-confirm-modal-actions">
               <button 
                 className="forum-forum-confirm-modal-btn forum-forum-confirm-modal-btn-cancel"
-                onClick={() => setDeletePostConfirm(null)}
+                onClick={() => {
+                  setDeletePostConfirm(null)
+                  setDeleteReason('')
+                  setDeleteReasonError('')
+                }}
               >
                 Hủy
               </button>
@@ -2569,17 +2821,17 @@ interface PostCardProps {
   submittingComment: string | null
   showReactionPicker: boolean
   setShowReactionPicker: (show: boolean) => void
-  formatDate: (date: string) => string
+  formatDate: (date: string | undefined | null, postId?: string) => string
   reactionTypes: Array<{ id: number; name: string; emoji: string }>
   getReactionTypeId: (reactionTypeName: string) => number
   onEdit?: (post: Post) => void
-  onDelete?: (postId: string) => void
+  onDelete?: (postId: string, postAuthorId?: number | string) => void
   showPostMenu?: boolean
   setShowPostMenu?: (show: boolean) => void
   deletingPost?: boolean
   onEditComment?: (commentId: string, currentContent: string) => void
   onUpdateComment?: (postId: string, commentId: string) => void
-  onDeleteComment?: (postId: string, commentId: string) => void
+  onDeleteComment?: (postId: string, commentId: string, commentAuthorId?: number) => void
   onReplyComment?: (postId: string, parentCommentId: string) => void
   onCommentReaction?: (postId: string, commentId: string, currentReactionId?: number) => void
   editCommentInputs?: Record<string, string>
@@ -2642,7 +2894,20 @@ const PostCard: React.FC<PostCardProps> = ({
 }) => {
   const isCommentsExpanded = expandedComments.has(post.PostId || '')
   const reactionCount = post.Likes?.length || 0
-  const commentCount = post.Comments?.length || 0
+  
+  // Helper function để đếm tổng số comments bao gồm cả replies (đệ quy)
+  const countTotalComments = (comments: PostComment[]): number => {
+    let total = 0
+    for (const comment of comments) {
+      total += 1 // Đếm comment hiện tại
+      if (comment.Replies && comment.Replies.length > 0) {
+        total += countTotalComments(comment.Replies) // Đếm replies đệ quy
+      }
+    }
+    return total
+  }
+  
+  const commentCount = countTotalComments(post.Comments || [])
   
   // Tìm reaction của user hiện tại từ post.Likes (backup nếu userReactionTypeId không có)
   const userLike = useMemo(() => {
@@ -2728,7 +2993,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onDelete && post.PostId) {
-      onDelete(post.PostId)
+      onDelete(post.PostId, post.PosterId || post.AuthorId)
     }
   }
 
@@ -2786,7 +3051,7 @@ const PostCard: React.FC<PostCardProps> = ({
             <div className="forum-forum-post-author-name">{post.PosterName || 'Người dùng'}</div>
             <div className="forum-forum-post-meta">
               <ClockIcon className="forum-forum-meta-icon" />
-              <span>{formatDate(post.PublicDate)}</span>
+              <span>{formatDate(post.PublicDate, post.PostId)}</span>
             </div>
           </div>
         </div>
@@ -3126,7 +3391,7 @@ const PostCard: React.FC<PostCardProps> = ({
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         if (onDeleteComment && post.PostId) {
-                                          onDeleteComment(post.PostId, comment.PostCommentId)
+                                          onDeleteComment(post.PostId, comment.PostCommentId, comment.AuthorId)
                                           setShowCommentMenu((prev) => {
                                             const newState = { ...prev }
                                             delete newState[commentKey]

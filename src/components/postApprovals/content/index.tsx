@@ -29,8 +29,29 @@ const statusMeta: Record<string, { label: string; color: 'warning' | 'success' |
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return 'Chưa cập nhật'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  
+  // Thử parse date với nhiều format khác nhau
+  let date: Date
+  
+  // Nếu là số (timestamp)
+  if (typeof value === 'number' || /^\d+$/.test(value)) {
+    date = new Date(Number(value))
+  } else {
+    // Thử parse trực tiếp
+    date = new Date(value)
+    
+    // Nếu không hợp lệ, thử thêm 'Z' cho UTC
+    if (Number.isNaN(date.getTime()) && !value.endsWith('Z') && !value.includes('+')) {
+      date = new Date(value + 'Z')
+    }
+  }
+  
+  // Kiểm tra date có hợp lệ không
+  if (Number.isNaN(date.getTime())) {
+    console.warn('[PostApprovals] Invalid date value:', value)
+    return 'Chưa cập nhật'
+  }
+  
   return date.toLocaleString('vi-VN')
 }
 
@@ -51,6 +72,10 @@ export default function PostApprovalsContent() {
   const [imageDialog, setImageDialog] = useState<{ open: boolean; images: string[] }>({
     open: false, images: []
   })
+  const [viewPostDialog, setViewPostDialog] = useState<{ open: boolean; post: PendingPost | null }>({
+    open: false, post: null
+  })
+  const [expandedPosts, setExpandedPosts] = useState<Set<number>>(new Set())
 
   // Filter posts based on search query
   const filteredPosts = useMemo(() => {
@@ -270,10 +295,29 @@ export default function PostApprovalsContent() {
                               }}
                             >
                               <Typography sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary', fontSize: '0.95rem' }}>
-                                {post.postContent?.length > 300
+                                {post.postContent && post.postContent.length > 300 && !expandedPosts.has(post.id)
                                   ? `${post.postContent.substring(0, 300)}...`
                                   : post.postContent}
                               </Typography>
+                              {post.postContent && post.postContent.length > 300 && (
+                                <Button
+                                  size="small"
+                                  onClick={() => {
+                                    setExpandedPosts(prev => {
+                                      const newSet = new Set(prev)
+                                      if (newSet.has(post.id)) {
+                                        newSet.delete(post.id)
+                                      } else {
+                                        newSet.add(post.id)
+                                      }
+                                      return newSet
+                                    })
+                                  }}
+                                  sx={{ mt: 1, textTransform: 'none', fontWeight: 600 }}
+                                >
+                                  {expandedPosts.has(post.id) ? 'Thu gọn' : 'Xem thêm'}
+                                </Button>
+                              )}
                             </Box>
 
                             {post.images && post.images.length > 0 && (
@@ -287,6 +331,16 @@ export default function PostApprovalsContent() {
                                 Xem {post.images.length} ảnh
                               </Button>
                             )}
+
+                            <Button
+                              startIcon={<ArticleIcon />}
+                              onClick={() => setViewPostDialog({ open: true, post })}
+                              variant="text"
+                              size="small"
+                              sx={{ alignSelf: 'flex-start', borderRadius: '999px', fontWeight: 600 }}
+                            >
+                              Xem chi tiết bài viết
+                            </Button>
 
                             {post.hashtags && post.hashtags.length > 0 && (
                               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -448,6 +502,147 @@ export default function PostApprovalsContent() {
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setImageDialog({ open: false, images: [] })} sx={{ borderRadius: '0.8rem' }}>
             Đóng
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Post Detail Dialog */}
+      <Dialog 
+        open={viewPostDialog.open} 
+        onClose={() => setViewPostDialog({ open: false, post: null })} 
+        maxWidth="md" 
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: '1.5rem', maxHeight: '90vh' }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: '1px solid rgba(0,0,0,0.08)', pb: 2 }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar
+              src={viewPostDialog.post?.posterAvatar || undefined}
+              sx={{ width: 48, height: 48, bgcolor: alpha('#1976d2', 0.2), color: 'primary.main' }}
+            >
+              {viewPostDialog.post?.posterName?.charAt(0).toUpperCase() || 'U'}
+            </Avatar>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                {viewPostDialog.post?.posterName}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {formatDateTime(viewPostDialog.post?.createdAt)}
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          {viewPostDialog.post && (
+            <Stack spacing={2}>
+              {viewPostDialog.post.articleTitle && (
+                <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                  {viewPostDialog.post.articleTitle}
+                </Typography>
+              )}
+              
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'rgba(0,0,0,0.02)',
+                  borderRadius: '1rem',
+                  border: '1px solid rgba(0,0,0,0.06)'
+                }}
+              >
+                <Typography sx={{ whiteSpace: 'pre-wrap', fontSize: '1rem', lineHeight: 1.8 }}>
+                  {viewPostDialog.post.postContent}
+                </Typography>
+              </Box>
+
+              {viewPostDialog.post.images && viewPostDialog.post.images.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                    Hình ảnh ({viewPostDialog.post.images.length})
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                    {viewPostDialog.post.images.map((img, idx) => (
+                      <Box 
+                        key={idx} 
+                        sx={{ 
+                          width: viewPostDialog.post!.images!.length === 1 ? '100%' : 'calc(50% - 8px)',
+                          cursor: 'pointer',
+                          '&:hover': { opacity: 0.9 }
+                        }}
+                        onClick={() => window.open(img, '_blank')}
+                      >
+                        <img 
+                          src={img} 
+                          alt={`Image ${idx + 1}`} 
+                          style={{ 
+                            width: '100%', 
+                            borderRadius: 12,
+                            maxHeight: 400,
+                            objectFit: 'cover'
+                          }} 
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+
+              {viewPostDialog.post.hashtags && viewPostDialog.post.hashtags.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                  {viewPostDialog.post.hashtags.map((tag, idx) => (
+                    <Chip
+                      key={idx}
+                      label={`#${tag}`}
+                      size="small"
+                      sx={{ bgcolor: 'rgba(25,118,210,0.08)', color: 'primary.main' }}
+                    />
+                  ))}
+                </Box>
+              )}
+
+              {viewPostDialog.post.rejectComment && (
+                <Alert severity="warning" sx={{ borderRadius: '0.8rem' }}>
+                  Ghi chú trước đó: {viewPostDialog.post.rejectComment}
+                </Alert>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+          <Button 
+            onClick={() => setViewPostDialog({ open: false, post: null })} 
+            sx={{ borderRadius: '0.8rem' }}
+          >
+            Đóng
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircleIcon />}
+            onClick={() => {
+              setViewPostDialog({ open: false, post: null })
+              if (viewPostDialog.post) {
+                setApproveDialog({ open: true, post: viewPostDialog.post })
+              }
+            }}
+            sx={{ borderRadius: '0.8rem' }}
+          >
+            Phê duyệt
+          </Button>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<CancelIcon />}
+            onClick={() => {
+              setViewPostDialog({ open: false, post: null })
+              if (viewPostDialog.post) {
+                setRejectDialog({ open: true, post: viewPostDialog.post, comment: '', error: '' })
+              }
+            }}
+            sx={{ borderRadius: '0.8rem' }}
+          >
+            Từ chối
           </Button>
         </DialogActions>
       </Dialog>

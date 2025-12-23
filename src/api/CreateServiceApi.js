@@ -21,7 +21,7 @@ export const createService = async (formData, comboId = null) => {
     // Handle image if present (for now, we'll skip image upload as it requires file handling)
     // Image upload can be added later with proper file handling endpoint
 
-    const response = await fetch(`${backend_url}/api/Service`, {
+    const response = await fetch(`${backend_url}/api/service`, {
       method: "POST",
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -77,7 +77,7 @@ export const getMyServices = async () => {
     throw new Error('Authentication required. Please log in again.');
   }
 
-  const response = await fetch(`${backend_url}/api/Service/mine`, {
+  const response = await fetch(`${backend_url}/api/service/mine`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -116,7 +116,7 @@ export const addServiceToCombo = async (comboId, serviceId, quantity = 1) => {
       body: requestBody
     });
 
-    const response = await fetch(`${backend_url}/api/ServiceComboDetail`, {
+    const response = await fetch(`${backend_url}/api/servicecombodetail`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,

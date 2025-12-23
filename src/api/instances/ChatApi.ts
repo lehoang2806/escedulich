@@ -6,6 +6,7 @@ export type ChatUser = {
   role: string
   roleId: number
   email: string
+  avatar?: string
 }
 
 export type ChatMessage = {
@@ -22,6 +23,82 @@ export type SendChatPayload = {
   receiverId: string
   content: string
   imageUrl?: string
+}
+
+// Cache avatar để không phải gọi API nhiều lần
+const avatarCache: Map<string, string> = new Map()
+
+/**
+ * Lấy avatar của user từ API /api/user/{userId}
+ * Có cache để tránh gọi API nhiều lần
+ */
+export const getUserAvatar = async (userId: string): Promise<string> => {
+  // Kiểm tra cache trước
+  if (avatarCache.has(userId)) {
+    return avatarCache.get(userId) || ''
+  }
+
+  try {
+    const token = getAuthToken()
+    if (!token) {
+      return ''
+    }
+
+    const response = await fetchWithFallback(`/api/user/${userId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      console.warn(`[ChatApi] Failed to get avatar for user ${userId}:`, response.status)
+      avatarCache.set(userId, '') // Cache empty để không gọi lại
+      return ''
+    }
+
+    const result = await response.json()
+    const avatar = result?.avatar ?? result?.Avatar ?? result?.avatarUrl ?? result?.AvatarUrl ?? ''
+    
+    // Lưu vào cache
+    avatarCache.set(userId, avatar)
+    console.log(`[ChatApi] Got avatar for user ${userId}:`, avatar ? 'found' : 'empty')
+    
+    return avatar
+  } catch (error) {
+    console.warn(`[ChatApi] Error getting avatar for user ${userId}:`, error)
+    avatarCache.set(userId, '') // Cache empty để không gọi lại
+    return ''
+  }
+}
+
+/**
+ * Lấy avatar cho nhiều users cùng lúc
+ */
+export const getUserAvatars = async (userIds: string[]): Promise<Map<string, string>> => {
+  const results = new Map<string, string>()
+  
+  // Lọc ra những user chưa có trong cache
+  const uncachedIds = userIds.filter(id => !avatarCache.has(id))
+  
+  // Lấy từ cache trước
+  userIds.forEach(id => {
+    if (avatarCache.has(id)) {
+      results.set(id, avatarCache.get(id) || '')
+    }
+  })
+
+  // Gọi API cho những user chưa có cache (song song)
+  if (uncachedIds.length > 0) {
+    const promises = uncachedIds.map(async (id) => {
+      const avatar = await getUserAvatar(id)
+      results.set(id, avatar)
+    })
+    await Promise.all(promises)
+  }
+
+  return results
 }
 
 // Kết nối backend thật
@@ -98,7 +175,8 @@ const normalizeChatUser = (payload: any): ChatUser => {
       fullName: payload.fullName ?? payload.FullName ?? '',
       role: payload.role ?? payload.Role ?? '',
       roleId: Number(payload.roleId ?? payload.RoleId ?? 0),
-      email: payload.email ?? payload.Email ?? ''
+      email: payload.email ?? payload.Email ?? '',
+      avatar: payload.avatar ?? payload.Avatar ?? payload.avatarUrl ?? payload.AvatarUrl ?? ''
     }
   } catch (error) {
     console.warn('[ChatApi] Failed to normalize ChatUser:', payload, error)

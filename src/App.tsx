@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Suspense, lazy } from 'react'
 import { NotificationProvider } from './contexts/NotificationContext'
 import LoadingSpinner from './components/common/LoadingSpinner'
@@ -48,11 +48,12 @@ const RegisterHost = lazy(() => import('~/components/user/RegisterHost'))
 const UpgradeAccount = lazy(() => import('~/components/user/UpgradeAccount'))
 const UpgradePaymentPage = lazy(() => import('~/components/user/UpgradePaymentPage'))
 const UpgradePaymentSuccessPage = lazy(() => import('~/components/user/UpgradePaymentSuccessPage'))
+const UpgradePaymentFailurePage = lazy(() => import('~/components/user/UpgradePaymentFailurePage'))
+const UpgradePaymentCallback = lazy(() => import('~/components/user/UpgradePaymentCallback'))
 const SubscriptionPackages = lazy(() => import('~/components/user/SubscriptionPackages'))
 
 // Host Dashboard
 const HostDashboard = lazy(() => import('~/components/user/HostDashboard'))
-const AgencyDashboard = lazy(() => import('~/components/user/AgencyDashboard'))
 const UserCreateTour = lazy(() => import('~/components/user/CreateTour'))
 
 // User Management pages
@@ -70,17 +71,18 @@ const Revenue = lazy(() => import('~/components/user/Revenue'))
 const ReviewManager = lazy(() => import('~/components/user/ReviewManager'))
 
 // User Support component
-// const Support = lazy(() => import('~/components/user/support/Support'))
+const Support = lazy(() => import('~/components/user/support/Support'))
 
 
 function App() {
   return (
     <NotificationProvider>
+      <BrowserRouter>
         <Suspense fallback={<LoadingSpinner />}>
           {/* Support chat widget - hiển thị trên tất cả trang user */}
-          {/* <Suspense fallback={null}>
+          <Suspense fallback={null}>
             <Support />
-          </Suspense> */}
+          </Suspense>
           
           <Routes>
             {/* ==================== USER ROUTES ==================== */}
@@ -112,6 +114,8 @@ function App() {
             <Route path="/upgrade/payment/:upgradeRequestId" element={<UpgradePaymentPage />} />
             <Route path="/upgrade/payment/success/:upgradeRequestId" element={<UpgradePaymentSuccessPage />} />
             <Route path="/upgrade-payment-success" element={<UpgradePaymentSuccessPage />} />
+            <Route path="/upgrade-payment-failure" element={<UpgradePaymentFailurePage />} />
+            <Route path="/upgrade-payment-callback" element={<UpgradePaymentCallback />} />
             <Route path="/subscription-packages" element={<SubscriptionPackages />} />
             
             {/* Trang người dùng */}
@@ -132,15 +136,12 @@ function App() {
             <Route path="/host/coupons" element={<CouponManager />} />
             
             {/* ==================== AGENCY ROUTES ==================== */}
-            <Route path="/agency" element={<AgencyDashboard />} />
-            <Route path="/agency/dashboard" element={<AgencyDashboard />} />
             <Route path="/agency/tours" element={<ServiceComboManager />} />
             <Route path="/agency/bookings" element={<BookingManager />} />
             <Route path="/agency/revenue" element={<Revenue />} />
             
             {/* Legacy routes - giữ lại để tương thích */}
             <Route path="/host-dashboard" element={<HostDashboard />} />
-            <Route path="/agency-dashboard" element={<AgencyDashboard />} />
             <Route path="/create-tour" element={<UserCreateTour />} />
             
             {/* Quản lý dịch vụ */}
@@ -221,6 +222,7 @@ function App() {
             } />
           </Routes>
         </Suspense>
+      </BrowserRouter>
     </NotificationProvider>
   )
 }

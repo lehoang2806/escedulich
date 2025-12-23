@@ -5,7 +5,7 @@ export const backend_url = API_BASE_URL.replace('/api', '')
 
 export const login = async (userEmail, password) => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/login`, {
+    const response = await fetch(`${backend_url}/api/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -52,7 +52,7 @@ export const login = async (userEmail, password) => {
 
 export const forgotPassword = async (email, phoneNumber) => {
   console.log('🌐 [API] forgotPassword được gọi với:', { email, phoneNumber })
-  console.log('🌐 [API] URL:', `${backend_url}/api/Auth/RequestOtpForgetPassword`)
+  console.log('🌐 [API] URL:', `${backend_url}/api/auth/requestotpforgetpassword`)
 
   try {
     const requestBody = {
@@ -61,7 +61,7 @@ export const forgotPassword = async (email, phoneNumber) => {
     }
     console.log('🌐 [API] Request body:', requestBody)
 
-    const response = await fetch(`${backend_url}/api/Auth/RequestOtpForgetPassword`, {
+    const response = await fetch(`${backend_url}/api/auth/requestotpforgetpassword`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -108,7 +108,7 @@ export const forgotPassword = async (email, phoneNumber) => {
 
 export const verifyOtp = async (email, otp) => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/VerifyOtpForgetPassword`, {
+    const response = await fetch(`${backend_url}/api/auth/verifyotpforgetpassword`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -145,7 +145,7 @@ export const verifyOtp = async (email, otp) => {
 // Chỉ cần gửi Rating và Comment theo backend hiện tại
 export const updateReview = async (reviewId, rating, comment) => {
   const token = localStorage.getItem('token') || sessionStorage.getItem('token') || ''
-  const url = `${backend_url}/api/Review/${reviewId}`
+  const url = `${backend_url}/api/review/${reviewId}`
   const body = {
     Rating: Number(rating),
     Comment: comment && comment.trim() ? comment.trim() : null
@@ -186,7 +186,7 @@ export const updateReview = async (reviewId, rating, comment) => {
 
 export const resetPassword = async (email, otp, newPassword) => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/ResetPassword`, {
+    const response = await fetch(`${backend_url}/api/auth/resetpassword`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -222,7 +222,7 @@ export const resetPassword = async (email, otp, newPassword) => {
 // Registration OTP functions
 export const requestOtpForRegister = async (email, phoneNumber = '') => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/RequestOtp`, {
+    const response = await fetch(`${backend_url}/api/auth/requestotp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -258,7 +258,7 @@ export const requestOtpForRegister = async (email, phoneNumber = '') => {
 
 export const verifyOtpForRegister = async (email, otp) => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/VerifyOtp`, {
+    const response = await fetch(`${backend_url}/api/auth/verifyotp`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -291,7 +291,7 @@ export const verifyOtpForRegister = async (email, otp) => {
 
 export const register = async (userEmail, password, fullName, phone = '') => {
   try {
-    const response = await fetch(`${backend_url}/api/Auth/register`, {
+    const response = await fetch(`${backend_url}/api/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

@@ -218,6 +218,17 @@
   font-weight: 600;
   font-size: 14px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.admin-chat-avatar-user {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.admin-chat-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .admin-chat-message-content {
@@ -422,6 +433,13 @@
   font-size: 16px;
   margin-right: 12px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.admin-chat-user-avatar-small img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .admin-chat-user-item-info {

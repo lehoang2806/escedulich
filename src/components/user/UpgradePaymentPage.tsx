@@ -122,7 +122,7 @@ const UpgradePaymentPage = () => {
 
       // Gọi API tạo upgrade payment cho Agency
       // PayOS chỉ cho phép description tối đa 25 ký tự
-      const description = `Nâng cấp Agency`.substring(0, 25)
+      const description = 'Nang cap tai khoan ESCE'
       
       const requestBody = {
         UserId: userId,

@@ -1,8 +1,8 @@
 import './EditService.css';
 import React, { useState, useEffect, useCallback } from 'react';
-import { updateService, getServiceById } from '../api/ServiceApi';
+import { updateService, getServiceById } from '../API/ServiceApi';
 import Header from './Header';
-import { getCurrentUser } from '../api/SocialMediaApi';
+import { getCurrentUser } from '../API/SocialMediaApi';
 
 const EditService = () => {
    // State management

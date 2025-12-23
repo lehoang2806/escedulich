@@ -123,12 +123,27 @@ export default function ViewProfile({ onEdit }: ViewProfileProps) {
 
         console.log('[ViewProfile] Profile received from API:', profile)
 
+        // Lấy avatar từ localStorage nếu API không trả về
+        let avatarToUse = profile.avatar
+        if (!avatarToUse) {
+          try {
+            const storedUserInfo = localStorage.getItem('userInfo')
+            if (storedUserInfo) {
+              const parsed = JSON.parse(storedUserInfo)
+              avatarToUse = parsed.avatar || parsed.Avatar
+              console.log('[ViewProfile] Using avatar from localStorage:', avatarToUse)
+            }
+          } catch (e) {
+            console.error('[ViewProfile] Error reading avatar from localStorage:', e)
+          }
+        }
+
         const normalizedProfile: UserInfo = {
           id: profile.id,
           name: profile.name,
           fullName: profile.name,
           email: profile.email,
-          avatar: profile.avatar ?? undefined,
+          avatar: avatarToUse ?? undefined,
           phone: profile.phone ?? undefined,
           gender: profile.gender ?? undefined,
           address: profile.address ?? undefined,
@@ -149,9 +164,38 @@ export default function ViewProfile({ onEdit }: ViewProfileProps) {
         setUserInfo(normalizedProfile)
         localStorage.setItem('userInfo', JSON.stringify(normalizedProfile))
       } catch (err) {
-        console.error('[ViewProfile] Failed to load profile', err)
+        console.error('[ViewProfile] Failed to load profile from API, using localStorage', err)
+        // Khi API fail, dùng data từ localStorage thay vì hiển thị lỗi
         if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Không thể tải thông tin hồ sơ.')
+          try {
+            const storedUserInfo = localStorage.getItem('userInfo')
+            if (storedUserInfo) {
+              const parsed = JSON.parse(storedUserInfo)
+              const localProfile: UserInfo = {
+                id: parsed.id || parsed.Id,
+                name: parsed.name || parsed.Name || parsed.fullName,
+                fullName: parsed.fullName || parsed.name || parsed.Name,
+                email: parsed.email || parsed.Email,
+                avatar: parsed.avatar || parsed.Avatar,
+                phone: parsed.phone || parsed.Phone,
+                gender: parsed.gender || parsed.Gender,
+                address: parsed.address || parsed.Address,
+                dateOfBirth: parsed.dateOfBirth || parsed.dob,
+                dob: parsed.dob || parsed.dateOfBirth || null,
+                roleId: parsed.roleId || parsed.RoleId,
+                roleName: parsed.roleName || parsed.RoleName,
+                role: parsed.role || parsed.Role
+              }
+              console.log('[ViewProfile] Using profile from localStorage:', localProfile)
+              setUserInfo(localProfile)
+              // Không set error vì đã có data từ localStorage
+            } else {
+              setError('Không thể tải thông tin hồ sơ.')
+            }
+          } catch (parseErr) {
+            console.error('[ViewProfile] Error parsing localStorage:', parseErr)
+            setError('Không thể tải thông tin hồ sơ.')
+          }
         }
       } finally {
         if (isMounted) {

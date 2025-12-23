@@ -215,8 +215,9 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
       try {
         // Upload avatar lên Firebase và dùng URL trả về
         const url = await uploadImageToFirebase(file, 'avatars')
+        console.log('[EditProfile] Avatar uploaded to Firebase:', url)
         setAvatarPreview(url)
-        setFormData({ ...formData, avatar: url })
+        setFormData((prev) => ({ ...prev, avatar: url }))
       } catch (error) {
         console.error('Error uploading avatar to Firebase:', error)
         setSnackbar({
@@ -271,13 +272,37 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
 
     try {
       setIsSaving(true)
+      
+      // Lấy TotalSpent từ localStorage nếu có
+      let totalSpent = '0'
+      try {
+        const storedUserInfo = localStorage.getItem('userInfo')
+        if (storedUserInfo) {
+          const parsed = JSON.parse(storedUserInfo)
+          totalSpent = String(parsed.totalSpent ?? parsed.TotalSpent ?? '0')
+        }
+      } catch (e) {
+        console.error('[EditProfile] Error reading TotalSpent from localStorage:', e)
+      }
+      
       const payload = {
         Name: formData.name.trim(),
         Phone: formData.phone ?? '',
         Avatar: formData.avatar ?? '',
         Gender: formData.gender ?? '',
         Address: formData.address ?? '',
-        DOB: formData.dateOfBirth ?? ''
+        DOB: formData.dateOfBirth ?? '',
+        TotalSpent: totalSpent
+      }
+
+      console.log('[EditProfile] formData.avatar before send:', formData.avatar)
+      console.log('[EditProfile] avatarPreview:', avatarPreview)
+      console.log('[EditProfile] Payload to send:', payload)
+
+      // Nếu avatarPreview có giá trị nhưng formData.avatar không có, dùng avatarPreview
+      if (avatarPreview && !payload.Avatar) {
+        payload.Avatar = avatarPreview
+        console.log('[EditProfile] Using avatarPreview as Avatar:', avatarPreview)
       }
 
       const response = await updateProfileApi(payload)
@@ -479,11 +504,12 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                 sx={{
                   bgcolor: 'white',
                   mb: 3,
+                  mt: 1,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '1.2rem',
-                    py: 0.5,
                     '& .MuiInputBase-input': {
-                      py: 1.5,
+                      py: 1.8,
+                      px: 1,
                       fontSize: '1.4rem',
                       lineHeight: 1.6
                     },
@@ -497,7 +523,13 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   },
                   '& .MuiInputLabel-root': {
                     fontSize: '1.4rem',
-                    lineHeight: 1.6
+                    lineHeight: 1.6,
+                    transform: 'translate(14px, 16px) scale(1)',
+                    '&.MuiInputLabel-shrink': {
+                      transform: 'translate(14px, -9px) scale(0.75)',
+                      backgroundColor: 'white',
+                      padding: '0 8px'
+                    }
                   },
                   '& .MuiInputLabel-root.Mui-focused': {
                     color: 'primary.main'
@@ -518,11 +550,12 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                 }}
                 sx={{
                   bgcolor: 'grey.100',
+                  mb: 3,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '1.2rem',
-                    py: 0.5,
                     '& .MuiInputBase-input': {
-                      py: 1.5,
+                      py: 1.8,
+                      px: 1,
                       fontSize: '1.4rem',
                       lineHeight: 1.6
                     },
@@ -532,7 +565,13 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   },
                   '& .MuiInputLabel-root': {
                     fontSize: '1.4rem',
-                    lineHeight: 1.6
+                    lineHeight: 1.6,
+                    transform: 'translate(14px, 16px) scale(1)',
+                    '&.MuiInputLabel-shrink': {
+                      transform: 'translate(14px, -9px) scale(0.75)',
+                      backgroundColor: 'white',
+                      padding: '0 8px'
+                    }
                   }
                 }}
               />
@@ -540,7 +579,8 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                 sx={{
                   display: 'grid',
                   gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
-                  gap: '2rem'
+                  gap: '2rem',
+                  mb: 3
                 }}
               >
                 <TextField
@@ -559,9 +599,9 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     bgcolor: 'white',
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '1.2rem',
-                      py: 0.5,
                       '& .MuiInputBase-input': {
-                        py: 1.5,
+                        py: 1.8,
+                        px: 1,
                         fontSize: '1.4rem',
                         lineHeight: 1.6
                       },
@@ -575,7 +615,13 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     },
                     '& .MuiInputLabel-root': {
                       fontSize: '1.4rem',
-                      lineHeight: 1.6
+                      lineHeight: 1.6,
+                      transform: 'translate(14px, 16px) scale(1)',
+                      '&.MuiInputLabel-shrink': {
+                        transform: 'translate(14px, -9px) scale(0.75)',
+                        backgroundColor: 'white',
+                        padding: '0 8px'
+                      }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
                       color: 'primary.main'
@@ -599,9 +645,9 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     bgcolor: 'white',
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '1.2rem',
-                      py: 0.5,
                       '& .MuiInputBase-input': {
-                        py: 1.5,
+                        py: 1.8,
+                        px: 1,
                         fontSize: '1.4rem',
                         lineHeight: 1.6
                       },
@@ -615,7 +661,13 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     },
                     '& .MuiInputLabel-root': {
                       fontSize: '1.4rem',
-                      lineHeight: 1.6
+                      lineHeight: 1.6,
+                      transform: 'translate(14px, 16px) scale(1)',
+                      '&.MuiInputLabel-shrink': {
+                        transform: 'translate(14px, -9px) scale(0.75)',
+                        backgroundColor: 'white',
+                        padding: '0 8px'
+                      }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
                       color: 'primary.main'
@@ -644,7 +696,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   minRows={3}
                   InputProps={{
                     startAdornment: (
-                      <InputAdornment position="start">
+                      <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1.5 }}>
                         <HomeIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
                       </InputAdornment>
                     )
@@ -653,8 +705,10 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     bgcolor: 'white',
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '1.2rem',
-                      py: 0.5,
+                      alignItems: 'flex-start',
                       '& .MuiInputBase-input': {
+                        py: 1.8,
+                        px: 1,
                         fontSize: '1.4rem',
                         lineHeight: 1.6
                       },
@@ -668,7 +722,13 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     },
                     '& .MuiInputLabel-root': {
                       fontSize: '1.4rem',
-                      lineHeight: 1.6
+                      lineHeight: 1.6,
+                      transform: 'translate(14px, 16px) scale(1)',
+                      '&.MuiInputLabel-shrink': {
+                        transform: 'translate(14px, -9px) scale(0.75)',
+                        backgroundColor: 'white',
+                        padding: '0 8px'
+                      }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
                       color: 'primary.main'
@@ -698,9 +758,9 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     bgcolor: 'white',
                     '& .MuiOutlinedInput-root': {
                       borderRadius: '1.2rem',
-                      py: 0.5,
                       '& .MuiInputBase-input': {
-                        py: 1.5,
+                        py: 1.8,
+                        px: 1,
                         fontSize: '1.4rem',
                         lineHeight: 1.6
                       },
@@ -714,7 +774,10 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     },
                     '& .MuiInputLabel-root': {
                       fontSize: '1.4rem',
-                      lineHeight: 1.6
+                      lineHeight: 1.6,
+                      transform: 'translate(14px, -9px) scale(0.75)',
+                      backgroundColor: 'white',
+                      padding: '0 8px'
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
                       color: 'primary.main'

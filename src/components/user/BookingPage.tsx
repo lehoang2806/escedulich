@@ -62,9 +62,23 @@ const BookingPage = () => {
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [bookingType, setBookingType] = useState('single-day'); // 'single-day' hoặc 'multi-day'
-  const [startDate, setStartDate] = useState('');
+  // Khởi tạo startDate với ngày hôm nay (format YYYY-MM-DD)
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const [startDate, setStartDate] = useState(getTodayDateString());
   const [endDate, setEndDate] = useState('');
-  const [startTime, setStartTime] = useState('08:00'); // Thời gian bắt đầu cho single-day
+  // Khởi tạo startTime với giờ hiện tại + 30 phút (để đảm bảo sau 20 phút)
+  const getDefaultStartTime = () => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 30);
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+  const [startTime, setStartTime] = useState(getDefaultStartTime()); // Thời gian bắt đầu cho single-day
   const [calculatedTotal, setCalculatedTotal] = useState(0);
   const [validationError, setValidationError] = useState('');
   const [slotCheckError, setSlotCheckError] = useState(''); // Lỗi khi kiểm tra slot
@@ -510,12 +524,24 @@ const BookingPage = () => {
 
   // Fetch available coupons for the service combo
   const fetchAvailableCoupons = async () => {
-    if (!id) return;
-    
+    if (!id || !service) return;
+
     setLoadingCoupons(true);
     try {
       const coupons = await couponService.getCouponsForCombo(parseInt(id));
-      setAvailableCoupons(coupons || []);
+      
+      // Lọc coupon theo HostId và ServiceComboId
+      // Chỉ hiển thị coupon của Host sở hữu service combo này VÀ đã được gán cho combo này
+      const hostId = service.HostId || service.hostId;
+      const comboId = parseInt(id);
+      const filteredCoupons = (coupons || []).filter((coupon: any) => {
+        const couponHostId = coupon.HostId || coupon.hostId;
+        const couponServiceComboId = coupon.ServiceComboId || coupon.serviceComboId;
+        // Coupon phải thuộc về Host sở hữu service combo VÀ đã được gán cho combo này
+        return couponHostId === hostId && couponServiceComboId === comboId;
+      });
+      
+      setAvailableCoupons(filteredCoupons);
     } catch (err) {
       console.error('Error fetching coupons:', err);
       setAvailableCoupons([]);
@@ -777,25 +803,42 @@ const BookingPage = () => {
         return false;
       }
 
-      const selectedDate = new Date(startDate);
+      // Parse startDate từ string YYYY-MM-DD để tránh lỗi timezone
+      const [year, month, day] = startDate.split('-').map(Number);
+      const selectedDateOnly = new Date(year, month - 1, day); // month - 1 vì JS month bắt đầu từ 0
+      
+      // Tạo today với timezone local, reset về 00:00:00
       const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-      if (selectedDate < today) {
+      // Debug log
+      console.log('📅 [BookingPage] Date validation:', {
+        startDate,
+        parsedDate: { year, month, day },
+        selectedDateOnly: selectedDateOnly.toISOString(),
+        todayDateOnly: todayDateOnly.toISOString(),
+        selectedTime: selectedDateOnly.getTime(),
+        todayTime: todayDateOnly.getTime(),
+        isInPast: selectedDateOnly.getTime() < todayDateOnly.getTime()
+      });
+
+      if (selectedDateOnly.getTime() < todayDateOnly.getTime()) {
         setValidationError('Ngày đi không được là ngày trong quá khứ');
         return false;
       }
 
-      // Nếu chọn ngày hôm nay, kiểm tra thời gian phải sau giờ hiện tại
-      if (selectedDate.toDateString() === today.toDateString()) {
+      // Nếu chọn ngày hôm nay, kiểm tra thời gian phải sau giờ hiện tại + 20 phút
+      if (selectedDateOnly.getTime() === todayDateOnly.getTime()) {
         const [hours, minutes] = startTime.split(':').map(Number);
-        const selectedDateTime = new Date(selectedDate);
-        selectedDateTime.setHours(hours, minutes, 0, 0);
+        const selectedDateTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
         const now = new Date();
         
-        // Nếu thời gian đã chọn <= thời gian hiện tại, không cho phép
-        if (selectedDateTime <= now) {
-          setValidationError('Nếu chọn ngày hôm nay, thời gian phải sau giờ hiện tại');
+        // Thêm 20 phút vào thời gian hiện tại để Farm có thời gian chuẩn bị
+        const minAllowedTime = new Date(now.getTime() + 20 * 60 * 1000);
+        
+        // Nếu thời gian đã chọn < thời gian hiện tại + 20 phút, không cho phép
+        if (selectedDateTime < minAllowedTime) {
+          setValidationError('Vui lòng chọn thời gian sau thời điểm hiện tại 20 phút');
           return false;
         }
       }
@@ -917,9 +960,11 @@ const BookingPage = () => {
       const currentStatus = currentService.Status || currentService.status || 'open';
       const normalizedCurrentStatus = String(currentStatus).toLowerCase();
       const allowedStatuses = ['open', 'approved', 'active', 'available'];
-      const currentAvailableSlots = currentService.AvailableSlots !== undefined 
-        ? currentService.AvailableSlots 
-        : (currentService.availableSlots !== undefined ? currentService.availableSlots : 0);
+      
+      // Lấy AvailableSlots - null/undefined nghĩa là không giới hạn slot
+      const rawAvailableSlots = currentService.AvailableSlots ?? currentService.availableSlots;
+      const hasSlotLimit = rawAvailableSlots !== undefined && rawAvailableSlots !== null && rawAvailableSlots > 0;
+      const maxSlots = hasSlotLimit ? rawAvailableSlots : null;
       
       if (!allowedStatuses.includes(normalizedCurrentStatus)) {
         setValidationError('Dịch vụ này đã không còn khả dụng');
@@ -927,10 +972,50 @@ const BookingPage = () => {
         return;
       }
 
-      if (currentAvailableSlots > 0 && quantity > currentAvailableSlots) {
-        setValidationError(`Chỉ còn ${currentAvailableSlots} chỗ trống`);
-        setSubmitting(false);
-        return;
+      // Kiểm tra slot theo ngày cụ thể nếu service có giới hạn slot
+      if (hasSlotLimit && startDate) {
+        try {
+          // Lấy tất cả booking của ServiceCombo này
+          const bookingsResponse = await axiosInstance.get(`${API_ENDPOINTS.BOOKING}/combo/${id}`);
+          const existingBookings = bookingsResponse.data || [];
+          
+          // Đếm số slot đã được đặt trong ngày khách chọn (không tính booking đã hủy)
+          const selectedDateStr = new Date(startDate).toDateString();
+          const bookedSlotsOnDate = existingBookings
+            .filter((booking: any) => {
+              const bookingDate = booking.BookingDate || booking.bookingDate;
+              const bookingStatus = (booking.Status || booking.status || '').toLowerCase();
+              // Chỉ đếm booking không bị hủy
+              if (bookingStatus === 'cancelled' || bookingStatus === 'canceled') return false;
+              // Kiểm tra cùng ngày
+              if (!bookingDate) return false;
+              return new Date(bookingDate).toDateString() === selectedDateStr;
+            })
+            .reduce((total: number, booking: any) => {
+              return total + (booking.Quantity || booking.quantity || 1);
+            }, 0);
+          
+          const remainingSlots = maxSlots - bookedSlotsOnDate;
+          
+          console.log(`📊 [BookingPage] Slot check: maxSlots=${maxSlots}, bookedOnDate=${bookedSlotsOnDate}, remaining=${remainingSlots}, requesting=${quantity}`);
+          
+          // Kiểm tra nếu hết slot trong ngày đó
+          if (remainingSlots <= 0) {
+            setValidationError('Gói dịch vụ thời điểm bạn đặt đã hết. Vui lòng chọn thời điểm khác nhé');
+            setSubmitting(false);
+            return;
+          }
+
+          // Kiểm tra nếu số lượng đặt vượt quá slot còn lại
+          if (quantity > remainingSlots) {
+            setValidationError(`Ngày này chỉ còn ${remainingSlots} chỗ trống. Vui lòng giảm số lượng hoặc chọn ngày khác`);
+            setSubmitting(false);
+            return;
+          }
+        } catch (slotCheckError) {
+          // Nếu không lấy được booking (404 = chưa có booking nào), bỏ qua kiểm tra
+          console.log('📊 [BookingPage] Không thể kiểm tra slot, tiếp tục đặt:', slotCheckError);
+        }
       }
 
       // Validate bk-selected services - chỉ validate nếu có dịch vụ được chọn
@@ -1104,6 +1189,21 @@ const BookingPage = () => {
 
       // Lấy bookingId từ response
       const bookingId = response.data.Id || response.data.id;
+      
+      // Nếu có coupon, áp dụng coupon vào booking
+      if (appliedCoupon && bookingId) {
+        try {
+          console.log(' BookingPage: Đang áp dụng coupon vào booking...');
+          await axiosInstance.post(`${API_ENDPOINTS.COUPON}/apply`, {
+            BookingId: bookingId,
+            CouponCode: appliedCoupon.Code
+          });
+          console.log(' BookingPage: Áp dụng coupon thành công!');
+        } catch (couponErr: any) {
+          console.warn(' BookingPage: Không thể áp dụng coupon:', couponErr?.message);
+          // Không block flow, vẫn chuyển đến trang thanh toán
+        }
+      }
       
       // Chuyển đến trang thanh toán
       if (!bookingId) {
@@ -1576,6 +1676,7 @@ const BookingPage = () => {
                         hostId={service?.HostId || service?.hostId}
                         onServicesLoaded={setComplementaryServicesData}
                         maxSelectable={quantity}
+                        comboDescription={service?.Description || service?.description || ''}
                       />
                     )}
 
@@ -1812,7 +1913,6 @@ const BookingPage = () => {
                     <div className="bk-info-box-content">
                       <strong>Thông tin quan trọng</strong>
                       <ul>
-                        <li>Bạn sẽ nhận được email xác nhận sau khi đặt dịch vụ</li>
                         <li>Thanh toán sẽ được thực hiện sau khi xác nhận</li>
                         <li>Vui lòng kiểm tra lại thông tin trước khi xác nhận</li>
                       </ul>

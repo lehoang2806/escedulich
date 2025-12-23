@@ -117,6 +117,11 @@ const ProfilePage = () => {
   const originalFormDataRef = useRef(null);
   const fileInputRef = useRef(null);
   
+  // Cancel booking modal states
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancellingBooking, setCancellingBooking] = useState<any>(null);
+  const [cancellingInProgress, setCancellingInProgress] = useState(false);
+  
   // Review management states
   const [reviewSortBy, setReviewSortBy] = useState('newest'); // 'newest', 'oldest', 'highest', 'lowest'
   const [reviewFilterRating, setReviewFilterRating] = useState(0); // 0 = all, 1-5 = filter by rating
@@ -275,6 +280,29 @@ const ProfilePage = () => {
         }
 
         setUserInfo(userData);
+        
+        // Cập nhật localStorage với thông tin mới từ API (đặc biệt là RoleId khi admin duyệt upgrade)
+        const updatedStorageInfo = {
+          ...storageUserInfo,
+          ...userData,
+          // Đảm bảo cập nhật RoleId từ API
+          RoleId: userData.RoleId || userData.roleId || storageUserInfo?.RoleId || storageUserInfo?.roleId,
+          roleId: userData.RoleId || userData.roleId || storageUserInfo?.RoleId || storageUserInfo?.roleId,
+          // Giữ avatar từ storage nếu có
+          Avatar: storageUserInfo?.Avatar || storageUserInfo?.avatar || userData.Avatar || userData.avatar,
+          avatar: storageUserInfo?.Avatar || storageUserInfo?.avatar || userData.Avatar || userData.avatar,
+        };
+        
+        // Cập nhật localStorage/sessionStorage
+        if (localStorage.getItem('userInfo')) {
+          localStorage.setItem('userInfo', JSON.stringify(updatedStorageInfo));
+        }
+        if (sessionStorage.getItem('userInfo')) {
+          sessionStorage.setItem('userInfo', JSON.stringify(updatedStorageInfo));
+        }
+        
+        // Dispatch event để Header và các component khác biết cập nhật
+        window.dispatchEvent(new Event('userStorageChange'));
         
         // Format DOB to YYYY-MM-DD for input
         let dobFormatted = '';
@@ -860,6 +888,8 @@ const ProfilePage = () => {
       setError(null);
       setSuccess(null);
       setFieldErrors({});
+      
+      // Cho phép lưu ngay cả khi không có thay đổi (giữ nguyên giá trị hiện tại)
 
       // Validate tất cả các field - không dùng validateField vì nó async và có thể không kịp cập nhật state
       const validationErrors: { [key: string]: string } = {};
@@ -1529,7 +1559,7 @@ const ProfilePage = () => {
     const statusLower = (status || '').toLowerCase();
     switch (statusLower) {
       case 'pending':
-        return { text: 'Chờ xác nhận', className: 'profile-status-pending' };
+        return { text: 'Vui lòng hoàn thành thanh toán để đặt gói dịch vụ', className: 'profile-status-pending' };
       case 'confirmed':
         return { text: 'Đã xác nhận', className: 'profile-status-confirmed' };
       case 'processing':
@@ -1538,6 +1568,8 @@ const ProfilePage = () => {
         return { text: 'Hoàn thành', className: 'profile-status-completed' };
       case 'cancelled':
         return { text: 'Đã hủy', className: 'profile-status-cancelled' };
+      case 'paid':
+        return { text: 'Chờ xác nhận', className: 'profile-status-confirmed' };
       default:
         return { text: status || 'Chưa xác định', className: 'profile-status-unknown' };
     }
@@ -1651,6 +1683,77 @@ const ProfilePage = () => {
     }
   };
 
+  // Handle cancel booking
+  const handleCancelBooking = async () => {
+    if (!cancellingBooking) return;
+    
+    const bookingId = cancellingBooking.Id || cancellingBooking.id;
+    const serviceCombo = cancellingBooking.ServiceCombo || cancellingBooking.serviceCombo;
+    const serviceName = serviceCombo?.Name || serviceCombo?.name || 'Dịch vụ';
+    const serviceComboId = cancellingBooking.ServiceComboId || cancellingBooking.serviceComboId || serviceCombo?.Id || serviceCombo?.id;
+    const bookingNumber = cancellingBooking.BookingNumber || cancellingBooking.bookingNumber || bookingId;
+    
+    try {
+      setCancellingInProgress(true);
+      
+      // 1. Lấy HostId từ ServiceCombo trước
+      let hostId = serviceCombo?.HostId || serviceCombo?.hostId;
+      
+      // Nếu không có hostId trong serviceCombo, fetch từ API
+      if (!hostId && serviceComboId) {
+        try {
+          const comboResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO}/${serviceComboId}`);
+          hostId = comboResponse.data?.HostId || comboResponse.data?.hostId;
+        } catch (fetchErr) {
+          console.warn('Không thể lấy thông tin ServiceCombo:', fetchErr);
+        }
+      }
+      
+      // 2. Cập nhật status booking thành cancelled
+      await axiosInstance.put(`${API_ENDPOINTS.BOOKING}/${bookingId}/status`, JSON.stringify('cancelled'), {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // 3. Gửi thông báo cho host về việc booking bị hủy
+      if (hostId) {
+        try {
+          const userName = userInfo?.Name || userInfo?.name || 'Khách hàng';
+          await axiosInstance.post(`${API_ENDPOINTS.NOTIFICATION}`, {
+            UserId: hostId,
+            Title: 'Booking đã bị hủy',
+            Message: `Khách hàng ${userName} đã hủy đặt dịch vụ "${serviceName}" (Mã booking: ${bookingNumber})`,
+            Type: 'booking_cancelled',
+            IsRead: false
+          });
+          console.log('✅ Đã gửi thông báo hủy booking cho host:', hostId);
+        } catch (notifErr) {
+          console.warn('Không thể gửi thông báo cho host:', notifErr);
+        }
+      } else {
+        console.warn('Không tìm thấy HostId để gửi thông báo');
+      }
+      
+      // 4. Reload bookings
+      const userId = getUserId();
+      const response = await axiosInstance.get(`${API_ENDPOINTS.BOOKING}/user/${userId}`);
+      setBookings(response.data || []);
+      
+      // 5. Đóng modal và hiển thị thông báo thành công
+      setShowCancelModal(false);
+      setCancellingBooking(null);
+      setSuccess('Hủy đặt dịch vụ thành công!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      console.error('Lỗi khi hủy đặt dịch vụ:', err);
+      setError(err.response?.data?.message || 'Không thể hủy đặt dịch vụ. Vui lòng thử lại.');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setCancellingInProgress(false);
+    }
+  };
+
   return (
     <div className="profile-profile-page">
       <ConditionalHeader />
@@ -1660,11 +1763,18 @@ const ProfilePage = () => {
           <aside className="profile-profile-sidebar">
             <div className="profile-sidebar-user-info">
               <div className="profile-sidebar-avatar">
-                <LazyImage 
-                  src={avatarUrl} 
-                  alt="Avatar" 
-                  className="profile-sidebar-avatar-image"
-                />
+                {avatarUrl ? (
+                  <LazyImage 
+                    src={avatarUrl} 
+                    alt="Avatar" 
+                    className="profile-sidebar-avatar-image"
+                    fallbackSrc=""
+                  />
+                ) : (
+                  <div className="profile-sidebar-avatar-placeholder">
+                    <UserIcon className="profile-sidebar-avatar-icon" />
+                  </div>
+                )}
               </div>
               <h3 className="profile-sidebar-user-name">{displayName}</h3>
               <p className="profile-sidebar-user-email">{displayEmail}</p>
@@ -1810,11 +1920,18 @@ const ProfilePage = () => {
                 <div className="profile-avatar-section-compact">
                   <div className="profile-avatar-wrapper-compact">
                     <div className="profile-avatar-preview-compact">
-                      <LazyImage 
-                        src={formData.avatar} 
-                        alt="Avatar" 
-                        className="profile-avatar-image"
-                      />
+                      {formData.avatar ? (
+                        <LazyImage 
+                          src={formData.avatar} 
+                          alt="Avatar" 
+                          className="profile-avatar-image"
+                          fallbackSrc=""
+                        />
+                      ) : (
+                        <div className="profile-avatar-placeholder-compact">
+                          <UserIcon className="profile-avatar-placeholder-icon" />
+                        </div>
+                      )}
                     </div>
                     <label htmlFor="avatar-upload" className="profile-avatar-change-button">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2108,31 +2225,14 @@ const ProfilePage = () => {
                                 >
                                   Chi tiết
                                 </Button>
-                                {['pending', 'confirmed'].includes((booking.Status || booking.status)?.toLowerCase()) && (
+                                {['pending', 'confirmed', 'paid'].includes((booking.Status || booking.status)?.toLowerCase()) && (
                                   <Button
                                     variant="outline"
                                     size="sm"
                                     className="profile-cancel-booking-btn"
-                                    onClick={async () => {
-                                      if (window.confirm('Bạn có chắc muốn hủy đặt dịch vụ này?')) {
-                                        try {
-                                          setLoadingBookings(true);
-                                          // Backend nhận [FromBody] string status, không phải object
-                                          await axiosInstance.put(`${API_ENDPOINTS.BOOKING}/${bookingId}/status`, 'cancelled');
-                                          // Reload bookings
-                                          const userId = getUserId();
-                                          const response = await axiosInstance.get(`${API_ENDPOINTS.BOOKING}/user/${userId}`);
-                                          setBookings(response.data || []);
-                                          setSuccess('Hủy đặt dịch vụ thành công!');
-                                          setTimeout(() => setSuccess(null), 3000);
-                                        } catch (err) {
-                                          console.error(' Lỗi khi hủy đặt dịch vụ:', err);
-                                          setError(err.response?.data?.message || 'Không thể hủy đặt dịch vụ. Vui lòng thử lại.');
-                                          setTimeout(() => setError(null), 5000);
-                                        } finally {
-                                          setLoadingBookings(false);
-                                        }
-                                      }
+                                    onClick={() => {
+                                      setCancellingBooking(booking);
+                                      setShowCancelModal(true);
                                     }}
                                   >
                                     Hủy dịch vụ
@@ -2590,14 +2690,16 @@ const ProfilePage = () => {
                               <div>
                                 <strong>Đã được duyệt!</strong>
                                 <p>Chúc mừng! Tài khoản của bạn đã được nâng cấp lên {request.type}.</p>
-                                <Button 
-                                  variant="default" 
-                                  size="sm"
-                                  onClick={() => navigate(request.type === 'Agency' ? '/agency/dashboard' : '/host/dashboard')}
-                                  className="profile-upgrade-action-btn"
-                                >
-                                  Đi đến Dashboard
-                                </Button>
+                                {request.type === 'Host' && (
+                                  <Button 
+                                    variant="default" 
+                                    size="sm"
+                                    onClick={() => navigate('/host/dashboard')}
+                                    className="profile-upgrade-action-btn"
+                                  >
+                                    Đi đến Dashboard
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           )}
@@ -2628,17 +2730,19 @@ const ProfilePage = () => {
                       );
                     })}
                     
-                    {/* Button to create new upgrade request */}
-                    <div className="profile-upgrade-new-request">
-                      <Button 
-                        variant="outline" 
-                        onClick={() => navigate('/upgrade-account')}
-                        className="profile-upgrade-new-btn"
-                      >
-                        <ArrowRightIcon className="profile-button-icon" />
-                        Gửi yêu cầu nâng cấp mới
-                      </Button>
-                    </div>
+                    {/* Button to create new upgrade request - chỉ hiển thị khi chưa là Host hoặc Agency */}
+                    {!isHost && !isAgency && (
+                      <div className="profile-upgrade-new-request">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => navigate('/upgrade-account')}
+                          className="profile-upgrade-new-btn"
+                        >
+                          <ArrowRightIcon className="profile-button-icon" />
+                          Gửi yêu cầu nâng cấp mới
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2776,6 +2880,92 @@ const ProfilePage = () => {
           </div>
         </div>
       </main>
+
+      {/* Cancel Booking Confirmation Modal */}
+      {showCancelModal && cancellingBooking && (
+        <div className="profile-modal-overlay" onClick={() => !cancellingInProgress && setShowCancelModal(false)}>
+          <div className="profile-modal-content" onClick={(e) => e.stopPropagation()} style={{
+            maxWidth: '450px',
+            padding: '24px',
+            borderRadius: '12px',
+            backgroundColor: '#fff',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                backgroundColor: '#fef2f2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px'
+              }}>
+                <AlertCircleIcon style={{ width: '32px', height: '32px', color: '#ef4444' }} />
+              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                Xác nhận hủy dịch vụ
+              </h3>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                Bạn có chắc chắn muốn hủy gói dịch vụ này không?
+              </p>
+              <div style={{
+                backgroundColor: '#fef3c7',
+                border: '1px solid #f59e0b',
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '16px'
+              }}>
+                <p style={{ fontSize: '13px', color: '#92400e', margin: 0, fontWeight: '500' }}>
+                  ⚠️ Lưu ý: Nếu hủy bạn sẽ không nhận lại được tiền cọc
+                </p>
+              </div>
+              <div style={{ 
+                backgroundColor: '#f9fafb', 
+                borderRadius: '8px', 
+                padding: '12px',
+                textAlign: 'left'
+              }}>
+                <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 4px 0' }}>
+                  <strong>Dịch vụ:</strong> {(cancellingBooking.ServiceCombo || cancellingBooking.serviceCombo)?.Name || (cancellingBooking.ServiceCombo || cancellingBooking.serviceCombo)?.name || 'N/A'}
+                </p>
+                <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 4px 0' }}>
+                  <strong>Mã booking:</strong> {cancellingBooking.BookingNumber || cancellingBooking.bookingNumber || cancellingBooking.Id || cancellingBooking.id}
+                </p>
+                <p style={{ fontSize: '14px', color: '#374151', margin: 0 }}>
+                  <strong>Tổng tiền:</strong> {formatPrice(cancellingBooking.TotalAmount || cancellingBooking.totalAmount || 0)}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setCancellingBooking(null);
+                }}
+                disabled={cancellingInProgress}
+                style={{ minWidth: '120px' }}
+              >
+                Không, giữ lại
+              </Button>
+              <Button
+                variant="default"
+                onClick={handleCancelBooking}
+                disabled={cancellingInProgress}
+                style={{ 
+                  minWidth: '120px',
+                  backgroundColor: '#ef4444',
+                  borderColor: '#ef4444'
+                }}
+              >
+                {cancellingInProgress ? 'Đang hủy...' : 'Xác nhận hủy'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

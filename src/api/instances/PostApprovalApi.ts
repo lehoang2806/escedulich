@@ -4,6 +4,7 @@
  */
 
 import { fetchWithFallback, extractErrorMessage, getAuthToken } from './httpClient'
+import { saveApprovalTimeToFirestore, getApprovalTime as getApprovalTimeFromService } from '~/services/postApprovalService'
 
 export type PostStatus = 'Pending' | 'Approved' | 'Rejected' | 'Review' | string | null | undefined
 
@@ -115,6 +116,29 @@ export const getPendingPosts = async (): Promise<PendingPost[]> => {
 }
 
 /**
+ * Lưu thời gian phê duyệt bài viết vào localStorage (fallback)
+ * Để frontend hiển thị "vừa xong" thay vì thời gian tạo bài
+ * @deprecated Sử dụng saveApprovalTimeToFirestore thay thế
+ */
+const saveApprovedTime = (postId: number) => {
+  try {
+    const approvedTimes = JSON.parse(localStorage.getItem('post_approved_times') || '{}')
+    approvedTimes[postId] = new Date().toISOString()
+    localStorage.setItem('post_approved_times', JSON.stringify(approvedTimes))
+  } catch (e) {
+    console.error('[PostApprovalApi] Error saving approved time:', e)
+  }
+}
+
+/**
+ * Lấy thời gian phê duyệt bài viết
+ * Ưu tiên từ cached Firestore data, fallback to localStorage
+ */
+export const getApprovedTime = (postId: number | string, cachedTimes?: Record<string, string>): string | null => {
+  return getApprovalTimeFromService(postId, cachedTimes)
+}
+
+/**
  * Phê duyệt bài viết (Admin)
  * Endpoint: PUT /api/Post/approve
  */
@@ -132,6 +156,12 @@ export const approvePost = async (postId: number): Promise<string> => {
     })
     
     const result = await handleResponse<any>(response)
+    
+    // Lưu thời gian phê duyệt vào Firestore để tất cả users đều có thể truy cập
+    await saveApprovalTimeToFirestore(postId)
+    // Fallback: cũng lưu vào localStorage
+    saveApprovedTime(postId)
+    
     console.log('[PostApprovalApi] Post approved successfully')
     return result?.message || 'Đã phê duyệt bài viết thành công.'
   } catch (error: any) {

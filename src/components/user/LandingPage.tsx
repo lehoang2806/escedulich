@@ -959,13 +959,6 @@ const LandingPage = () => {
                   Khám phá dịch vụ ngay
                   <ArrowRightIcon className="btn-icon" aria-hidden="true" />
                 </Link>
-                <Link
-                  to="/about"
-                  className="ui-button ui-button-outline ui-button-lg cta-button-secondary"
-                  aria-label="Tìm hiểu thêm về ESCE"
-                >
-                  Tìm hiểu thêm
-                </Link>
               </div>
             </div>
           </div>

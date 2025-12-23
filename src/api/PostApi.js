@@ -6,7 +6,7 @@ const backend_url = API_BASE_URL.replace('/api', '');
 // Tour APIs
 export const createTour = async (tourData) => {
   try {
-    const response = await fetch(`${backend_url}/api/Post/create-tour`, {
+    const response = await fetch(`${backend_url}/api/post/create-tour`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -29,7 +29,7 @@ export const createTour = async (tourData) => {
 
 export const getAllTours = async () => {
   try {
-    const response = await fetch(`${backend_url}/api/Post/tours`, {
+    const response = await fetch(`${backend_url}/api/post/tours`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -51,7 +51,7 @@ export const getAllTours = async () => {
 // Tour Combo APIs
 export const createTourCombo = async (comboData) => {
   try {
-    const response = await fetch(`${backend_url}/api/Post/create-tour-combo`, {
+    const response = await fetch(`${backend_url}/api/post/create-tour-combo`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -74,7 +74,7 @@ export const createTourCombo = async (comboData) => {
 
 export const getAllTourCombos = async () => {
   try {
-    const response = await fetch(`${backend_url}/api/Post/tour-combos`, {
+    const response = await fetch(`${backend_url}/api/post/tour-combos`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",

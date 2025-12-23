@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import Header from './Header'
+import ConditionalHeader from './ConditionalHeader'
 import Footer from './Footer'
 import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
@@ -67,6 +67,11 @@ const PaymentFailurePage = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [failureReason, setFailureReason] = useState<string>('')
+
+  // Trigger Header re-check auth khi page load (sau khi redirect từ PayOS)
+  useEffect(() => {
+    window.dispatchEvent(new Event('userStorageChange'))
+  }, [])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -162,7 +167,7 @@ const PaymentFailurePage = () => {
   if (loading) {
     return (
       <div className="payment-result-page">
-        <Header />
+        <ConditionalHeader />
         <main className="payment-result-main">
           <LoadingSpinner message="Đang tải thông tin..." />
         </main>
@@ -173,7 +178,7 @@ const PaymentFailurePage = () => {
   if (error || !booking) {
     return (
       <div className="payment-result-page">
-        <Header />
+        <ConditionalHeader />
         <main className="payment-result-main">
           <div className="payment-result-container">
             <div className="payment-error-container" role="alert">
@@ -202,7 +207,7 @@ const PaymentFailurePage = () => {
 
   return (
     <div className="payment-result-page payment-failure-page">
-      <Header />
+      <ConditionalHeader />
       <main className="payment-result-main">
         <div className="payment-result-container">
           {/* Failure Icon */}

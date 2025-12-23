@@ -154,7 +154,7 @@ const PaymentPage = () => {
   const [originalTotal, setOriginalTotal] = useState(0)
   const [validatingCoupon, setValidatingCoupon] = useState(false)
   const [couponError, setCouponError] = useState('')
-  const [additionalServices, setAdditionalServices] = useState<Array<{ Name?: string; Description?: string; Price?: number; id?: number }>>([])
+  const [additionalServices, setAdditionalServices] = useState<Array<{ Name?: string; Description?: string; Price?: number; id?: number; quantity?: number }>>([])
   const [additionalServicesTotal, setAdditionalServicesTotal] = useState(0)
   
   // Complementary Services state
@@ -215,7 +215,10 @@ const PaymentPage = () => {
   }
 
   // Lấy returnUrl và returnTab từ location.state
-  const returnUrl = (location.state as { returnUrl?: string })?.returnUrl || '/services'
+  // Mặc định quay về trang booking của service combo đang xem
+  const serviceComboId = booking?.ServiceComboId || booking?.serviceComboId
+  const defaultReturnUrl = serviceComboId ? `/booking/${serviceComboId}` : '/services'
+  const returnUrl = (location.state as { returnUrl?: string })?.returnUrl || defaultReturnUrl
   const returnTab = (location.state as { returnTab?: string })?.returnTab || null
 
   // Fetch booking data
@@ -276,36 +279,67 @@ const PaymentPage = () => {
         // (để đảm bảo luôn có dữ liệu)
 
         // Parse Notes để lấy ghi chú và dịch vụ thêm
+        // Format từ BookingPage: [ADDITIONAL_SERVICES:id:qty,id:qty,...]
         const notes = (bookingData.Notes || bookingData.notes || '') as string
-        const additionalServicesIdsMatch = notes.match(/\[ADDITIONAL_SERVICES_IDS:([^\]]+)\]/)
+        console.log(' PaymentPage: Notes raw:', notes)
         
-        if (additionalServicesIdsMatch) {
-          const serviceIds = additionalServicesIdsMatch[1].split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+        const additionalServicesMatch = notes.match(/\[ADDITIONAL_SERVICES:([^\]]+)\]/)
+        console.log(' PaymentPage: additionalServicesMatch:', additionalServicesMatch)
+        
+        if (additionalServicesMatch) {
+          // Parse format: id:qty,id:qty,...
+          const serviceEntries = additionalServicesMatch[1].split(',').map(entry => {
+            const [idStr, qtyStr] = entry.split(':')
+            return {
+              id: parseInt(idStr.trim()),
+              quantity: parseInt(qtyStr?.trim() || '1')
+            }
+          }).filter(entry => !isNaN(entry.id) && entry.quantity > 0)
           
-          if (serviceIds.length > 0) {
+          console.log(' PaymentPage: serviceEntries:', serviceEntries)
+          
+          if (serviceEntries.length > 0) {
             try {
               // Fetch thông tin dịch vụ thêm
               const serviceComboId = bookingData.ServiceComboId || bookingData.serviceComboId
+              console.log(' PaymentPage: Fetching services for combo:', serviceComboId)
+              
               if (serviceComboId) {
                 const comboDetailResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO_DETAIL}/combo/${serviceComboId}`)
                 const comboDetails = comboDetailResponse.data || []
+                console.log(' PaymentPage: comboDetails:', comboDetails)
                 
-                // Lọc các dịch vụ theo ID và lấy cả Price
+                // Lọc các dịch vụ theo ID và lấy cả Price, kèm quantity từ notes
+                const serviceIds = serviceEntries.map(e => e.id)
+                console.log(' PaymentPage: Looking for serviceIds:', serviceIds)
+                
                 const services = comboDetails
                   .map((detail: any) => detail.Service || detail.service)
-                  .filter((service: any) => service && serviceIds.includes(service.Id || service.id))
-                  .map((service: any) => ({
-                    id: service.Id || service.id,
-                    Name: service.Name || service.name,
-                    Description: service.Description || service.description,
-                    Price: service.Price || service.price || 0
-                  }))
+                  .filter((service: any) => {
+                    if (!service) return false
+                    const svcId = service.Id || service.id
+                    const found = serviceIds.includes(svcId)
+                    console.log(' PaymentPage: Checking service:', svcId, 'found:', found)
+                    return found
+                  })
+                  .map((service: any) => {
+                    const svcId = service.Id || service.id
+                    const entry = serviceEntries.find(e => e.id === svcId)
+                    return {
+                      id: svcId,
+                      Name: service.Name || service.name,
+                      Description: service.Description || service.description,
+                      Price: service.Price || service.price || 0,
+                      quantity: entry?.quantity || 1
+                    }
+                  })
                 
+                console.log(' PaymentPage: Filtered services:', services)
                 setAdditionalServices(services)
                 
-                // Tính tổng tiền dịch vụ thêm (nhân với số lượng người)
-                const quantity = (bookingData.Quantity || bookingData.quantity || 1) as number
-                const servicesTotal = services.reduce((sum: number, s: any) => sum + (s.Price || 0) * quantity, 0)
+                // Tính tổng tiền dịch vụ thêm (dùng quantity riêng của mỗi service)
+                const servicesTotal = services.reduce((sum: number, s: any) => sum + (s.Price || 0) * (s.quantity || 1), 0)
+                console.log(' PaymentPage: servicesTotal:', servicesTotal)
                 setAdditionalServicesTotal(servicesTotal)
               }
             } catch (err) {
@@ -321,18 +355,96 @@ const PaymentPage = () => {
           setAdditionalServices([])
           setAdditionalServicesTotal(0)
         }
-
-        const bookingTotal = (bookingData.TotalAmount || bookingData.totalAmount || 0) as number
-
-        // Tính toán giá gốc (trước khi giảm Agency và coupon)
+        
+        // Tính giá gốc từ ServiceCombo.Price
         const serviceCombo = bookingData.ServiceCombo || bookingData.serviceCombo
-        const rawPrice = serviceCombo?.Price ?? serviceCombo?.price
-        const unitPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice)) || 0
+        let rawPrice = serviceCombo?.Price ?? serviceCombo?.price
+        let unitPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice)) || 0
         const rawQuantity = bookingData.Quantity ?? bookingData.quantity ?? 0
         const quantity = typeof rawQuantity === 'number' ? rawQuantity : parseInt(String(rawQuantity), 10) || 0
-        const originalPriceBeforeDiscount = unitPrice * quantity // Giá gốc chưa giảm Agency
+        
+        // Nếu không có giá từ ServiceCombo, fetch lại
+        if (unitPrice === 0 && (bookingData.ServiceComboId || bookingData.serviceComboId)) {
+          try {
+            const comboId = bookingData.ServiceComboId || bookingData.serviceComboId
+            const comboResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO}/${comboId}`)
+            const comboData = comboResponse.data
+            rawPrice = comboData?.Price ?? comboData?.price
+            unitPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice)) || 0
+            console.log(' PaymentPage: Fetch ServiceCombo price:', unitPrice)
+          } catch (err) {
+            console.warn(' PaymentPage: Không thể fetch ServiceCombo price:', err)
+          }
+        }
+        
+        const originalPriceBeforeDiscount = unitPrice * quantity
+        const bookingTotal = (bookingData.TotalAmount || bookingData.totalAmount || 0) as number
+        
+        // Parse coupon code từ Notes và tự tính discount ở frontend
+        // Format từ BookingPage: [COUPON_CODE:xxx]
+        const couponCodeMatch = notes.match(/\[COUPON_CODE:([^\]]+)\]/)
+        let couponDiscountCalculated = 0
+        
+        // Luôn set originalTotal trước, dù có coupon hay không
+        // Nếu có giá gốc từ ServiceCombo, dùng nó; nếu không, dùng bookingTotal
+        const baseOriginalTotal = originalPriceBeforeDiscount > 0 ? originalPriceBeforeDiscount : bookingTotal
+        setOriginalTotal(baseOriginalTotal)
+        
+        if (couponCodeMatch && couponCodeMatch[1]) {
+          const savedCouponCode = couponCodeMatch[1].trim()
+          setCouponCode(savedCouponCode)
+          console.log(' PaymentPage: Tìm thấy coupon code trong Notes:', savedCouponCode)
+          
+          // Fetch coupon info để tính discount
+          try {
+            const couponResponse = await axiosInstance.post(`${API_ENDPOINTS.COUPON}/calculate-discount`, {
+              Code: savedCouponCode,
+              OriginalAmount: baseOriginalTotal
+            })
+            couponDiscountCalculated = couponResponse.data?.Discount || couponResponse.data?.discount || 0
+            
+            if (couponDiscountCalculated > 0) {
+              setDiscountAmount(couponDiscountCalculated)
+              setAppliedCoupon({ Code: savedCouponCode, code: savedCouponCode })
+              console.log(' PaymentPage: Tính discount từ API:', {
+                originalPrice: baseOriginalTotal,
+                discount: couponDiscountCalculated
+              })
+            }
+          } catch (couponErr) {
+            console.warn(' PaymentPage: Không thể tính discount từ coupon:', couponErr)
+            // Fallback: so sánh giá gốc với TotalAmount
+            if (baseOriginalTotal > bookingTotal && bookingTotal > 0) {
+              couponDiscountCalculated = baseOriginalTotal - bookingTotal
+              setDiscountAmount(couponDiscountCalculated)
+              setAppliedCoupon({ Code: savedCouponCode, code: savedCouponCode })
+              console.log(' PaymentPage: Fallback discount:', couponDiscountCalculated)
+            }
+          }
+        }
+        
+        // Debug log
+        console.log(' PaymentPage: Tính toán giá:', {
+          bookingTotal,
+          serviceComboPrice: rawPrice,
+          unitPrice,
+          quantity,
+          originalPriceBeforeDiscount,
+          hasServiceCombo: !!serviceCombo,
+          notes: notes.substring(0, 100)
+        })
 
         const bookingCoupons = bookingData.BookingCoupons || bookingData.bookingCoupons || []
+        
+        // Kiểm tra xem đã có coupon từ Notes chưa (đã parse ở trên)
+        const hasCouponFromNotes = notes.match(/\[COUPON_CODE:([^\]]+)\]/) !== null
+        
+        console.log(' PaymentPage: Coupon info:', {
+          bookingCouponsLength: bookingCoupons.length,
+          hasCouponFromNotes,
+          couponCodeMatch: notes.match(/\[COUPON_CODE:([^\]]+)\]/)
+        })
+        
         if (bookingCoupons.length > 0) {
           const couponWrapper = bookingCoupons[0]
           const coupon = couponWrapper?.Coupon || couponWrapper?.coupon
@@ -340,22 +452,23 @@ const PaymentPage = () => {
             setAppliedCoupon(coupon)
             setCouponCode((coupon.Code || coupon.code || '') as string)
 
-            // Khi có coupon: originalTotal = giá sau khi giảm Agency (trước khi giảm coupon)
-            // discountAmount = giảm giá từ coupon
-            const estimatedBaseTotal = estimateBaseAmount(bookingData) // Giá sau khi giảm Agency
-            if (estimatedBaseTotal > bookingTotal) {
-              setOriginalTotal(estimatedBaseTotal)
-              setDiscountAmount(Math.max(0, estimatedBaseTotal - bookingTotal))
-            } else {
+            // Khi có coupon: originalTotal = giá gốc, discountAmount = giá gốc - giá đã giảm
+            if (originalPriceBeforeDiscount > bookingTotal) {
               setOriginalTotal(originalPriceBeforeDiscount)
               setDiscountAmount(Math.max(0, originalPriceBeforeDiscount - bookingTotal))
+              console.log(' PaymentPage: Set discount từ BookingCoupons:', originalPriceBeforeDiscount - bookingTotal)
+            } else {
+              const estimatedBaseTotal = estimateBaseAmount(bookingData)
+              setOriginalTotal(estimatedBaseTotal)
+              setDiscountAmount(Math.max(0, estimatedBaseTotal - bookingTotal))
+              console.log(' PaymentPage: Set discount từ estimatedBaseTotal:', estimatedBaseTotal - bookingTotal)
             }
           }
+        } else if (hasCouponFromNotes) {
+          // Đã xử lý coupon từ Notes ở trên, không cần làm gì thêm
+          console.log(' PaymentPage: Sử dụng coupon từ Notes')
         } else {
-          setAppliedCoupon(null)
-          setCouponCode('')
-
-          // Khi không có coupon: hiển thị giảm giá Agency nếu có
+          // Không có coupon từ BookingCoupons hoặc Notes
           const roleName =
             (bookingData?.User?.Role?.Name ||
               bookingData?.User?.Role?.name ||
@@ -369,8 +482,9 @@ const PaymentPage = () => {
             const originalPriceWithAgencyDiscount = bookingTotal / agencyDiscountRate
             setOriginalTotal(originalPriceWithAgencyDiscount)
             setDiscountAmount(Math.max(0, originalPriceWithAgencyDiscount - bookingTotal))
+            console.log(' PaymentPage: Set discount cho Agency')
           } else {
-            // Không phải Agency, không có giảm giá
+            // Không có giảm giá
             setOriginalTotal(bookingTotal)
             setDiscountAmount(0)
           }
@@ -602,19 +716,33 @@ const PaymentPage = () => {
         throw new Error('Thông tin đặt dịch vụ không hợp lệ')
       }
 
-      // Sử dụng Thành tiền (totalAmount + dịch vụ thêm) để thanh toán
-      const fullTotal = totalAmount + additionalServicesTotal
+      // Tính số tiền thanh toán thực tế (đã trừ giảm giá + dịch vụ thêm)
+      // Nếu có discount từ frontend, dùng: originalTotal - discountAmount + additionalServicesTotal
+      // Nếu không, dùng: totalAmount + additionalServicesTotal
+      const hasDiscountApplied = discountAmount > 0 && originalTotal > 0
+      const paymentAmount = hasDiscountApplied 
+        ? (originalTotal - discountAmount + additionalServicesTotal)
+        : (totalAmount + additionalServicesTotal)
       
-      if (fullTotal <= 0) {
+      console.log(' PaymentPage.handlePayment: Tính số tiền thanh toán:', {
+        totalAmount,
+        originalTotal,
+        discountAmount,
+        additionalServicesTotal,
+        hasDiscountApplied,
+        paymentAmount
+      })
+      
+      if (paymentAmount <= 0) {
         throw new Error('Số tiền thanh toán phải lớn hơn 0')
       }
 
       // PayOS chỉ cho phép description tối đa 25 ký tự
-      const description = `TT DV #${bookingIdValue}`.substring(0, 25)
+      const description = 'Goi dich vu ESCE'
       
       const paymentRequest = {
         BookingId: bookingIdValue,
-        Amount: fullTotal,
+        Amount: paymentAmount,
         Description: description,
       }
 
@@ -782,9 +910,13 @@ const PaymentPage = () => {
     bookingStatusLower !== 'confirmed' &&
     bookingStatusLower !== 'completed'
 
-  // Tổng tiền hiển thị (backend đã trừ discount) + dịch vụ thêm
-  const finalTotal = totalAmount + additionalServicesTotal
-  const hasDiscount = discountAmount > 0 && originalTotal > totalAmount
+  // Tổng tiền hiển thị
+  // Nếu có discount từ frontend (coupon trong Notes), tính: originalTotal - discountAmount + additionalServicesTotal
+  // Nếu không, dùng totalAmount từ backend + additionalServicesTotal
+  const hasDiscount = discountAmount > 0 && originalTotal > 0
+  const finalTotal = hasDiscount 
+    ? (originalTotal - discountAmount + additionalServicesTotal)
+    : (totalAmount + additionalServicesTotal)
 
   return (
     <div className="pay-payment-page">
@@ -951,8 +1083,11 @@ const PaymentPage = () => {
                     {/* 7. Ghi chú */}
                     {booking.Notes && (() => {
                       const notes = (booking.Notes || booking.notes || '') as string
-                      // Tách phần ghi chú thực sự (bỏ phần ADDITIONAL_SERVICES_IDS)
-                      const notesWithoutIds = notes.replace(/\n?\[ADDITIONAL_SERVICES_IDS:[^\]]+\]/g, '').trim()
+                      // Tách phần ghi chú thực sự (bỏ phần ADDITIONAL_SERVICES và COUPON_CODE)
+                      const notesWithoutIds = notes
+                        .replace(/\n?\[ADDITIONAL_SERVICES:[^\]]+\]/g, '')
+                        .replace(/\n?\[COUPON_CODE:[^\]]+\]/g, '')
+                        .trim()
                       
                       if (!notesWithoutIds) return null
                       
@@ -999,9 +1134,16 @@ const PaymentPage = () => {
                       <>
                         <div className="pay-summary-divider"></div>
                         <div className="pay-summary-row">
-                          <span className="pay-summary-label">Dịch vụ thêm ({additionalServices.length})</span>
+                          <span className="pay-summary-label">Dịch vụ thêm</span>
                           <span className="pay-summary-value">+{formatPrice(additionalServicesTotal)}</span>
                         </div>
+                        {/* Chi tiết từng dịch vụ thêm */}
+                        {additionalServices.map((svc, idx) => (
+                          <div key={idx} className="pay-summary-row" style={{ fontSize: '0.85rem', color: '#6b7280', paddingLeft: '12px' }}>
+                            <span className="pay-summary-label">• {svc.Name} x{svc.quantity || 1}</span>
+                            <span className="pay-summary-value">{formatPrice((svc.Price || 0) * (svc.quantity || 1))}</span>
+                          </div>
+                        ))}
                       </>
                     )}
 
@@ -1079,6 +1221,31 @@ const PaymentPage = () => {
                     </div>
                   ) : (
                     <div className="pay-payment-actions">
+                      {/* Cảnh báo về chính sách hủy */}
+                      <div style={{
+                        backgroundColor: '#fef3c7',
+                        border: '2px solid #f59e0b',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        marginBottom: '20px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '12px'
+                      }}>
+                        <span style={{ fontSize: '24px', flexShrink: 0 }}>⚠️</span>
+                        <div>
+                          <p style={{ 
+                            margin: 0, 
+                            fontSize: '14px', 
+                            fontWeight: '600', 
+                            color: '#92400e',
+                            lineHeight: '1.5'
+                          }}>
+                            Hãy kiểm tra kỹ trước khi thanh toán vì nếu hủy đặt gói dịch vụ bạn sẽ không được hoàn lại tiền đặt cọc
+                          </p>
+                        </div>
+                      </div>
+
                       <Button
                         variant="default"
                         size="lg"

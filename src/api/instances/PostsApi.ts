@@ -250,7 +250,7 @@ const normalizePost = (payload: any): PostDto => {
     images,
     authorId,
     authorName: payload?.authorName ?? payload?.AuthorName ?? payload?.posterName ?? payload?.PosterName ?? '',
-    authorAvatar: payload?.authorAvatar ?? payload?.AuthorAvatar ?? undefined,
+    authorAvatar: payload?.authorAvatar ?? payload?.AuthorAvatar ?? payload?.posterAvatar ?? payload?.PosterAvatar ?? undefined,
     authorRole: payload?.authorRole ?? payload?.AuthorRole ?? payload?.posterRole ?? payload?.PosterRole ?? '',
     status: payload?.status ?? payload?.Status ?? 'Pending',
     rejectComment: payload?.rejectComment ?? payload?.RejectComment ?? undefined,
@@ -561,6 +561,7 @@ export interface PostComment {
   replies?: PostCommentReply[]
   authorId?: number
   authorID?: number
+  parentCommentId?: number | null // For reply comments
 }
 
 export interface PostCommentLike {
@@ -568,6 +569,7 @@ export interface PostCommentLike {
   accountId: string
   fullName: string
   createdDate: string
+  avatar?: string
 }
 
 export interface PostCommentReply {
@@ -575,6 +577,12 @@ export interface PostCommentReply {
   fullName: string
   content: string
   createdDate: string
+  authorAvatar?: string
+  authorId?: number
+  parentCommentId?: number | null // For nested replies (reply of reply)
+  replyToName?: string // Name of the person being replied to
+  likes?: PostCommentLike[] // Likes for this reply
+  replies?: PostCommentReply[] // Nested replies (reply of reply)
 }
 
 
@@ -582,6 +590,7 @@ export interface CreateCommentDto {
   postId: string
   content: string
   images?: string[]
+  parentCommentId?: string // For reply to comment
 }
 
 export interface UpdateCommentDto {
@@ -634,7 +643,8 @@ const normalizeComment = (payload: any): PostComment | null => {
         postCommentLikeId: String(like?.Id ?? like?.id ?? like?.PostCommentLikeId ?? ''),
         accountId: String(like?.UserId ?? like?.userId ?? like?.AccountId ?? like?.accountId ?? ''),
         fullName: like?.User?.Name ?? like?.user?.name ?? like?.FullName ?? like?.fullName ?? 'Người dùng',
-        createdDate: like?.CreatedAt ?? like?.createdAt ?? new Date().toISOString()
+        createdDate: like?.CreatedAt ?? like?.createdAt ?? new Date().toISOString(),
+        avatar: like?.User?.Avatar ?? like?.user?.avatar ?? like?.User?.Image ?? like?.user?.image ?? like?.Avatar ?? like?.avatar ?? undefined
       }))
     : []
   
@@ -682,7 +692,8 @@ const normalizeComment = (payload: any): PostComment | null => {
     likes: normalizedLikes.length > 0 ? normalizedLikes : undefined,
     replies: normalizedReplies.length > 0 ? normalizedReplies : undefined,
     authorId: payload?.AuthorId ?? payload?.authorId ?? payload?.Author?.Id ?? payload?.author?.id,
-    authorID: payload?.AuthorId ?? payload?.authorId
+    authorID: payload?.AuthorId ?? payload?.authorId,
+    parentCommentId: payload?.ParentCommentId ?? payload?.parentCommentId ?? null
   }
 }
 
@@ -736,8 +747,90 @@ export const fetchCommentsByPost = async (postId: number): Promise<PostComment[]
       })
       .filter((comment: PostComment | null): comment is PostComment => comment !== null)
     
-    console.log(`[PostsApi] Fetched ${data.length} raw comments, normalized ${normalizedComments.length} valid comments for post ${postId}`)
-    return normalizedComments
+    // Organize comments into NESTED parent-child structure
+    // Each reply can have its own nested replies
+    const parentComments: PostComment[] = []
+    const allCommentsMap: Map<string, PostComment> = new Map()
+    
+    // First pass: create a map of all comments by ID
+    for (const comment of normalizedComments) {
+      const commentId = comment.postCommentId || String(comment.id || '')
+      allCommentsMap.set(commentId, comment)
+    }
+    
+    // Second pass: build nested structure
+    // Map to store replies by their direct parent ID
+    const repliesByDirectParent: Map<string, PostCommentReply[]> = new Map()
+    
+    for (const comment of normalizedComments) {
+      if (!comment.parentCommentId) {
+        // This is a parent comment
+        parentComments.push(comment)
+      } else {
+        // This is a reply - add to its direct parent
+        const directParentId = String(comment.parentCommentId)
+        const directParent = allCommentsMap.get(directParentId)
+        
+        // Check if this is a reply to a reply (not to root comment)
+        const isReplyToReply = directParent && directParent.parentCommentId !== null && directParent.parentCommentId !== undefined
+        const replyToName = isReplyToReply ? (directParent?.fullName || directParent?.authorName || undefined) : undefined
+        
+        // Create reply object
+        const reply: PostCommentReply = {
+          replyPostCommentId: comment.postCommentId || String(comment.id || ''),
+          fullName: comment.fullName || comment.authorName || 'Người dùng',
+          content: comment.content,
+          createdDate: comment.createdDate || comment.createdAt || new Date().toISOString(),
+          authorAvatar: comment.authorAvatar,
+          authorId: comment.authorId,
+          parentCommentId: comment.parentCommentId,
+          replyToName: replyToName,
+          likes: comment.likes,
+          replies: [] // Will be populated later
+        }
+        
+        // Add to direct parent's replies
+        if (!repliesByDirectParent.has(directParentId)) {
+          repliesByDirectParent.set(directParentId, [])
+        }
+        repliesByDirectParent.get(directParentId)!.push(reply)
+      }
+    }
+    
+    // Third pass: build nested reply structure recursively
+    const buildNestedReplies = (parentId: string): PostCommentReply[] => {
+      const directReplies = repliesByDirectParent.get(parentId) || []
+      
+      // Sort by date (oldest first)
+      directReplies.sort((a, b) => {
+        const dateA = new Date(a.createdDate || 0).getTime()
+        const dateB = new Date(b.createdDate || 0).getTime()
+        return dateA - dateB
+      })
+      
+      // Recursively build nested replies for each reply
+      for (const reply of directReplies) {
+        reply.replies = buildNestedReplies(reply.replyPostCommentId)
+      }
+      
+      return directReplies
+    }
+    
+    // Fourth pass: attach nested replies to parent comments
+    for (const parent of parentComments) {
+      const parentId = parent.postCommentId || String(parent.id || '')
+      parent.replies = buildNestedReplies(parentId)
+    }
+    
+    // Sort parent comments by date (newest first)
+    parentComments.sort((a, b) => {
+      const dateA = new Date(a.createdDate || a.createdAt || 0).getTime()
+      const dateB = new Date(b.createdDate || b.createdAt || 0).getTime()
+      return dateB - dateA // Newest first
+    })
+    
+    console.log(`[PostsApi] Fetched ${data.length} raw comments, organized into ${parentComments.length} parent comments with flattened replies for post ${postId}`)
+    return parentComments
   } catch (error: any) {
     const errorMessage = error?.message || 'Unknown error'
     console.error('[PostsApi] Error fetching comments:', {
@@ -769,7 +862,8 @@ export const createComment = async (dto: CreateCommentDto): Promise<void> => {
       body: JSON.stringify({
         PostId: String(dto.postId),
         Content: dto.content,
-        Images: dto.images || []
+        Images: dto.images || [],
+        PostCommentId: dto.parentCommentId || null // For reply - backend uses PostCommentId as parent
       })
     })
     

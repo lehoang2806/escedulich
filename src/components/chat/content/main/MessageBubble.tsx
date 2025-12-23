@@ -5,6 +5,7 @@ type Message = {
   id: number
   senderId: number
   senderName: string
+  senderAvatar?: string
   content: string
   timestamp: string
   image?: string
@@ -21,6 +22,8 @@ type MessageBubbleProps = {
   showTimestamp: boolean
   isFirstInGroup: boolean
   isLastInGroup: boolean
+  currentUserAvatar?: string
+  participantAvatar?: string
   onReactionClick?: (event: React.MouseEvent<HTMLElement>, messageId: number) => void
 }
 
@@ -40,6 +43,8 @@ export default function MessageBubble({
   showTimestamp,
   isFirstInGroup,
   isLastInGroup,
+  currentUserAvatar,
+  participantAvatar,
   onReactionClick
 }: MessageBubbleProps) {
   // Border radius theo vị trí trong nhóm tin nhắn
@@ -99,6 +104,7 @@ export default function MessageBubble({
           <Box sx={{ width: 32, height: 32, flexShrink: 0 }}>
             {showAvatar && (
               <Avatar
+                src={participantAvatar || message.senderAvatar || undefined}
                 sx={{
                   width: 32,
                   height: 32,
@@ -107,7 +113,27 @@ export default function MessageBubble({
                   boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)'
                 }}
               >
-                {message.senderName.charAt(0).toUpperCase()}
+                {!participantAvatar && !message.senderAvatar && message.senderName.charAt(0).toUpperCase()}
+              </Avatar>
+            )}
+          </Box>
+        )}
+
+        {/* Avatar của current user - bên phải */}
+        {isCurrentUser && (
+          <Box sx={{ width: 32, height: 32, flexShrink: 0 }}>
+            {showAvatar && (
+              <Avatar
+                src={currentUserAvatar || undefined}
+                sx={{
+                  width: 32,
+                  height: 32,
+                  fontSize: '1.2rem',
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  boxShadow: '0 2px 8px rgba(102, 126, 234, 0.25)'
+                }}
+              >
+                {!currentUserAvatar && message.senderName.charAt(0).toUpperCase()}
               </Avatar>
             )}
           </Box>

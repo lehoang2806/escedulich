@@ -57,6 +57,7 @@ export interface PostComment {
   likes?: PostCommentLike[]
   replies?: PostCommentReply[]
   authorId?: number
+  parentCommentId?: number | null // For reply comments
 }
 
 export interface PostCommentLike {
@@ -64,6 +65,7 @@ export interface PostCommentLike {
   accountId: string
   fullName: string
   createdDate: string
+  avatar?: string
 }
 
 export interface PostCommentReply {
@@ -71,6 +73,12 @@ export interface PostCommentReply {
   fullName: string
   content: string
   createdDate: string
+  authorAvatar?: string
+  authorId?: number
+  parentCommentId?: number | null
+  replyToName?: string
+  likes?: PostCommentLike[]
+  replies?: PostCommentReply[] // Nested replies
 }
 
 export interface CreateCommentDto {
@@ -436,9 +444,76 @@ export const fetchCommentsByPost = async (postId: number): Promise<PostComment[]
     const data = await response.json()
     if (!Array.isArray(data)) return []
     
-    return data
+    const normalizedComments = data
       .map(normalizeComment)
       .filter((comment): comment is PostComment => comment !== null)
+    
+    // Organize comments into NESTED parent-child structure
+    const parentComments: PostComment[] = []
+    const allCommentsMap: Map<string, PostComment> = new Map()
+    
+    // First pass: create a map of all comments by ID
+    for (const comment of normalizedComments) {
+      const commentId = comment.postCommentId || String(comment.id || '')
+      allCommentsMap.set(commentId, comment)
+    }
+    
+    // Second pass: build nested structure
+    const repliesByDirectParent: Map<string, PostCommentReply[]> = new Map()
+    
+    for (const comment of normalizedComments) {
+      if (!comment.parentCommentId) {
+        parentComments.push(comment)
+      } else {
+        const directParentId = String(comment.parentCommentId)
+        const directParent = allCommentsMap.get(directParentId)
+        const isReplyToReply = directParent && directParent.parentCommentId !== null && directParent.parentCommentId !== undefined
+        const replyToName = isReplyToReply ? (directParent?.fullName || directParent?.authorName || undefined) : undefined
+        
+        const reply: PostCommentReply = {
+          replyPostCommentId: comment.postCommentId || String(comment.id || ''),
+          fullName: comment.fullName || comment.authorName || 'Người dùng',
+          content: comment.content,
+          createdDate: comment.createdDate || comment.createdAt || new Date().toISOString(),
+          authorAvatar: comment.authorAvatar,
+          authorId: comment.authorId,
+          parentCommentId: comment.parentCommentId,
+          replyToName: replyToName,
+          likes: comment.likes,
+          replies: []
+        }
+        
+        if (!repliesByDirectParent.has(directParentId)) {
+          repliesByDirectParent.set(directParentId, [])
+        }
+        repliesByDirectParent.get(directParentId)!.push(reply)
+      }
+    }
+    
+    // Third pass: build nested reply structure recursively
+    const buildNestedReplies = (parentId: string): PostCommentReply[] => {
+      const directReplies = repliesByDirectParent.get(parentId) || []
+      directReplies.sort((a, b) => new Date(a.createdDate || 0).getTime() - new Date(b.createdDate || 0).getTime())
+      for (const reply of directReplies) {
+        reply.replies = buildNestedReplies(reply.replyPostCommentId)
+      }
+      return directReplies
+    }
+    
+    // Fourth pass: attach nested replies to parent comments
+    for (const parent of parentComments) {
+      const parentId = parent.postCommentId || String(parent.id || '')
+      parent.replies = buildNestedReplies(parentId)
+    }
+    
+    // Sort parent comments by date (newest first)
+    parentComments.sort((a, b) => {
+      const dateA = new Date(a.createdDate || a.createdAt || 0).getTime()
+      const dateB = new Date(b.createdDate || b.createdAt || 0).getTime()
+      return dateB - dateA
+    })
+    
+    return parentComments
   } catch (error) {
     console.error('[PostsApi] fetchCommentsByPost failed:', error)
     throw error

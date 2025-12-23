@@ -3,11 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
-import { getCurrentUser } from '../api/SocialMediaApi';
-import { getAllBookings } from '../api/BookingApi';
-import { getPaymentsByHostId } from '../api/PaymentApi';
-import { getMyServiceCombos } from '../api/ServiceComboApi';
-import { getAllReviews } from '../api/ReviewApi';
+import { getCurrentUser } from '../API/SocialMediaApi';
+import { getAllBookings } from '../API/BookingApi';
+import { getPaymentsByHostId } from '../API/PaymentApi';
+import { getMyServiceCombos } from '../API/ServiceComboApi';
+import { getAllReviews } from '../API/ReviewApi';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,

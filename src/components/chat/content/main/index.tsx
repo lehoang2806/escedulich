@@ -35,6 +35,7 @@ import {
   getChattedUsers,
   getChatHistory,
   sendChatMessage,
+  getUserAvatars,
   type ChatUser,
   type ChatMessage,
   deleteConversation
@@ -272,7 +273,8 @@ export default function ChatMainContent() {
   const currentUser = {
     id: currentUserId,
     name: userInfo.Name || userInfo.name || userInfo.fullName || userInfo.FullName || 'Admin',
-    email: userInfo.Email || userInfo.email || 'admin@example.com'
+    email: userInfo.Email || userInfo.email || 'admin@example.com',
+    avatar: userInfo.Avatar || userInfo.avatar || ''
   }
 
   // Debug log để kiểm tra
@@ -451,6 +453,10 @@ export default function ChatMainContent() {
     try {
       const users = await getChattedUsers()
 
+      // Lấy avatar cho tất cả users (song song)
+      const userIds = users.map((u) => u.userId)
+      const avatarMap = await getUserAvatars(userIds)
+
       // Tạo danh sách conversations ban đầu
       const initialConversations = users.map((user) => {
         const participantId = Number(user.userId)
@@ -458,7 +464,7 @@ export default function ChatMainContent() {
           id: participantId,
           participantId,
           participantName: user.fullName,
-          participantAvatar: '',
+          participantAvatar: avatarMap.get(user.userId) || user.avatar || '', // Lấy avatar từ API
           participantRole: user.role,
           lastMessage: 'Đang tải...',
           lastMessageTime: '',
@@ -1894,6 +1900,7 @@ export default function ChatMainContent() {
                     >
                       <ListItemAvatar>
                         <Avatar
+                          src={conversation.participantAvatar || undefined}
                           sx={{
                             width: 48,
                             height: 48,
@@ -1907,7 +1914,7 @@ export default function ChatMainContent() {
                             }
                           }}
                         >
-                          {conversation.participantName.charAt(0).toUpperCase()}
+                          {!conversation.participantAvatar && conversation.participantName.charAt(0).toUpperCase()}
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
@@ -2059,6 +2066,7 @@ export default function ChatMainContent() {
                 >
                   <Box className="flex items-center gap-[1.2rem]!">
                     <Avatar
+                      src={selectedConversation.participantAvatar || undefined}
                       sx={{
                         width: 48,
                         height: 48,
@@ -2067,7 +2075,7 @@ export default function ChatMainContent() {
                         border: '3px solid rgba(255, 255, 255, 0.9)'
                       }}
                     >
-                      {selectedConversation.participantName.charAt(0).toUpperCase()}
+                      {!selectedConversation.participantAvatar && selectedConversation.participantName.charAt(0).toUpperCase()}
                     </Avatar>
                     <Box>
                       <Typography
@@ -2173,6 +2181,8 @@ export default function ChatMainContent() {
                             showTimestamp={displayInfo.showTimestamp}
                             isFirstInGroup={displayInfo.isFirstInGroup}
                             isLastInGroup={displayInfo.isLastInGroup}
+                            currentUserAvatar={currentUser.avatar}
+                            participantAvatar={selectedConversation.participantAvatar}
                             onReactionClick={(e, msgId) => handleReactionClick(msgId, e)}
                           />
 

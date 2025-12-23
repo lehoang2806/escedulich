@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { ArrowLeftIcon, XIcon } from '~/components/user/icons'
 import axiosInstance from '~/utils/axiosInstance'
+import { getUserAvatars } from '~/api/instances/ChatApi'
 import './AdminChat.css'
 
 interface Message {
@@ -89,6 +90,22 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }, [])
 
+  // Get current user avatar from localStorage
+  const getCurrentUserAvatar = useCallback(() => {
+    try {
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+      if (userInfoStr) {
+        const userInfo = JSON.parse(userInfoStr)
+        const avatar = userInfo.Avatar || userInfo.avatar || userInfo.avatarUrl || userInfo.AvatarUrl || ''
+        console.log('[AdminChat] Current user avatar:', avatar, 'userInfo:', userInfo)
+        return avatar
+      }
+      return ''
+    } catch {
+      return ''
+    }
+  }, [])
+
   // Setup SignalR connection
   useEffect(() => {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token')
@@ -169,8 +186,35 @@ const AdminChat: React.FC<AdminChatProps> = ({
         axiosInstance.get('/chat/GetUserForChat'),
         axiosInstance.get('/chat/GetChattedUser')
       ])
-      setAllUsers(Array.isArray(allRes.data) ? allRes.data : [])
-      setChattedUsers(Array.isArray(chattedRes.data) ? chattedRes.data : [])
+      const allUsersData = Array.isArray(allRes.data) ? allRes.data : []
+      const chattedUsersData = Array.isArray(chattedRes.data) ? chattedRes.data : []
+
+      // Lấy avatar cho tất cả users sử dụng function từ ChatApi (giống bên Admin)
+      const allUserIds = [
+        ...allUsersData.map((u: ChatUser) => u.UserId || u.userId),
+        ...chattedUsersData.map((u: ChatUser) => u.UserId || u.userId)
+      ].filter(Boolean) as string[]
+
+      // Sử dụng getUserAvatars từ ChatApi (có cache)
+      const avatarMap = await getUserAvatars([...new Set(allUserIds)])
+
+      // Gán avatar vào users
+      const allUsersWithAvatar = allUsersData.map((u: ChatUser) => ({
+        ...u,
+        Avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || '',
+        avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || ''
+      }))
+
+      const chattedUsersWithAvatar = chattedUsersData.map((u: ChatUser) => ({
+        ...u,
+        Avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || '',
+        avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || ''
+      }))
+
+      console.log('[AdminChat] Users with avatar:', { allUsersWithAvatar, chattedUsersWithAvatar })
+
+      setAllUsers(allUsersWithAvatar)
+      setChattedUsers(chattedUsersWithAvatar)
     } catch (err) {
       console.error('Error fetching users:', err)
     } finally {
@@ -240,6 +284,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
   }
 
   const handleSelectUser = async (user: ChatUser) => {
+    console.log('[AdminChat] Selected user:', user, 'Avatar:', user.Avatar || user.avatar)
     setSelectedUser(user)
     setMessages([])
     
@@ -467,13 +512,26 @@ const AdminChat: React.FC<AdminChatProps> = ({
                   >
                     {!message.isUser && (
                       <div className="admin-chat-avatar">
-                        <span>{(selectedUser.FullName || selectedUser.fullName || 'U')[0]}</span>
+                        {(selectedUser.Avatar || selectedUser.avatar) ? (
+                          <img src={selectedUser.Avatar || selectedUser.avatar} alt="Avatar" className="admin-chat-avatar-img" />
+                        ) : (
+                          <span>{(selectedUser.FullName || selectedUser.fullName || 'U')[0]}</span>
+                        )}
                       </div>
                     )}
                     <div className="admin-chat-message-content">
                       <div className="admin-chat-message-bubble">{message.text}</div>
                       <div className="admin-chat-message-time">{formatRelativeTime(message.timestamp)}</div>
                     </div>
+                    {message.isUser && (
+                      <div className="admin-chat-avatar admin-chat-avatar-user">
+                        {getCurrentUserAvatar() ? (
+                          <img src={getCurrentUserAvatar()} alt="Avatar" className="admin-chat-avatar-img" />
+                        ) : (
+                          <span>{(userName || 'U')[0]}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -574,7 +632,11 @@ const AdminChat: React.FC<AdminChatProps> = ({
                             onClick={() => handleSelectUser(user)}
                           >
                             <div className="admin-chat-user-avatar-small">
-                              {(user.FullName || user.fullName || 'U')[0]}
+                              {(user.Avatar || user.avatar) ? (
+                                <img src={user.Avatar || user.avatar} alt="Avatar" className="admin-chat-avatar-img" />
+                              ) : (
+                                (user.FullName || user.fullName || 'U')[0]
+                              )}
                             </div>
                             <div className="admin-chat-user-item-info">
                               <div className="admin-chat-user-item-header">
@@ -617,7 +679,11 @@ const AdminChat: React.FC<AdminChatProps> = ({
                             onClick={() => handleSelectUser(user)}
                           >
                             <div className="admin-chat-user-avatar-small">
-                              {(user.FullName || user.fullName || 'U')[0]}
+                              {(user.Avatar || user.avatar) ? (
+                                <img src={user.Avatar || user.avatar} alt="Avatar" className="admin-chat-avatar-img" />
+                              ) : (
+                                (user.FullName || user.fullName || 'U')[0]
+                              )}
                             </div>
                             <div className="admin-chat-user-item-info">
                               <span className="admin-chat-user-item-name">{user.FullName || user.fullName}</span>

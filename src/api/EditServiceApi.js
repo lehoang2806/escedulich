@@ -9,7 +9,7 @@ export const getServiceById = async (serviceId) => {
     throw new Error('Authentication required');
   }
 
-  const response = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const response = await fetch(`${backend_url}/api/service/${serviceId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -74,7 +74,7 @@ export const updateService = async (formData) => {
     };
   }
 
-  const response = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const response = await fetch(`${backend_url}/api/service/${serviceId}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Box,
   Card,
@@ -61,8 +61,11 @@ import {
   type PostDto,
   type CreatePostDto,
   type UpdatePostDto,
-  type PostComment
+  type PostComment,
+  type PostCommentReply
 } from '~/api/instances/PostsApi'
+import { getApprovedTime } from '~/api/instances/PostApprovalApi'
+import { saveApprovalTimeToFirestore, getAllApprovalTimesFromFirestore } from '~/services/postApprovalService'
 
 const getRoleColor = (role: string) => {
   switch (role?.toLowerCase()) {
@@ -115,17 +118,66 @@ const REACTIONS: { key: ReactionKey; label: string; emoji: string }[] = [
   { key: 'angry', label: 'Phẫn nộ', emoji: '😡' }
 ]
 
-const formatTimeAgo = (dateString?: string) => {
-  if (!dateString) return 'Vừa xong'
+const formatTimeAgo = (dateString?: string, postId?: number | string) => {
+  // Ưu tiên sử dụng thời gian phê duyệt từ localStorage nếu có
+  // Để hiển thị "vừa xong" khi bài viết mới được Admin phê duyệt
+  let effectiveDate = dateString
+  if (postId) {
+    const approvedTime = getApprovedTime(postId)
+    if (approvedTime) {
+      effectiveDate = approvedTime
+    }
+  }
+  
+  if (!effectiveDate) return 'Vừa xong'
 
   try {
-    const date = new Date(dateString)
+    let date: Date
+    
+    // Thử parse với nhiều format khác nhau
+    // Backend có thể trả về format "dd/MM/yyyy HH:mm" hoặc ISO format
+    if (effectiveDate.includes('/')) {
+      const parts = effectiveDate.split(' ')
+      const dateParts = parts[0].split('/')
+      if (dateParts.length === 3) {
+        const day = parseInt(dateParts[0], 10)
+        const month = parseInt(dateParts[1], 10) - 1
+        const year = parseInt(dateParts[2], 10)
+        
+        if (parts.length > 1 && parts[1]?.includes(':')) {
+          const timeParts = parts[1].split(':')
+          const hours = parseInt(timeParts[0], 10)
+          const minutes = parseInt(timeParts[1], 10)
+          // Tạo date với UTC vì backend lưu UTC
+          date = new Date(Date.UTC(year, month, day, hours, minutes))
+        } else {
+          date = new Date(Date.UTC(year, month, day))
+        }
+      } else {
+        date = new Date(effectiveDate)
+      }
+    } else {
+      // ISO format - backend trả về UTC nhưng có thể không có 'Z'
+      // Nếu không có timezone indicator, coi như UTC
+      if (!effectiveDate.endsWith('Z') && !effectiveDate.includes('+') && !effectiveDate.includes('-', 10)) {
+        date = new Date(effectiveDate + 'Z')
+      } else {
+        date = new Date(effectiveDate)
+      }
+    }
+    
+    // Kiểm tra date có hợp lệ không
+    if (isNaN(date.getTime())) {
+      return 'Vừa xong'
+    }
+    
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
 
+    if (diffMins < 0) return 'Vừa xong' // Trường hợp thời gian trong tương lai
     if (diffMins < 1) return 'Vừa xong'
     if (diffMins < 60) return `${diffMins} phút trước`
     if (diffHours < 24) return `${diffHours} giờ trước`
@@ -134,6 +186,29 @@ const formatTimeAgo = (dateString?: string) => {
   } catch {
     return 'Vừa xong'
   }
+}
+
+// Helper function to count total comments including all nested replies
+const countTotalComments = (comments: PostComment[]): number => {
+  let total = 0
+  
+  const countReplies = (replies: PostCommentReply[] | undefined): number => {
+    if (!replies || replies.length === 0) return 0
+    let count = replies.length
+    for (const reply of replies) {
+      if (reply.replies && reply.replies.length > 0) {
+        count += countReplies(reply.replies)
+      }
+    }
+    return count
+  }
+  
+  for (const comment of comments) {
+    total += 1 // Count the parent comment
+    total += countReplies(comment.replies) // Count all nested replies
+  }
+  
+  return total
 }
 
 export default function PostsManagement() {
@@ -225,6 +300,23 @@ export default function PostsManagement() {
   const [updatingComment, setUpdatingComment] = useState<Set<string>>(new Set())
   const [deletingComment, setDeletingComment] = useState<Set<string>>(new Set())
   const [likingComments, setLikingComments] = useState<Set<string>>(new Set())
+  
+  // Reply Comment State
+  const [replyingTo, setReplyingTo] = useState<{ postId: number; commentId: string; authorName: string } | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [creatingReply, setCreatingReply] = useState(false)
+
+  // Delete Comment Confirm Dialog State
+  const [deleteCommentDialogOpen, setDeleteCommentDialogOpen] = useState(false)
+  const [deletingCommentInfo, setDeletingCommentInfo] = useState<{ commentId: string; postId: number; authorId?: number; isOwnContent?: boolean } | null>(null)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleteReasonError, setDeleteReasonError] = useState('')
+
+  // Delete Post with Reason State (for deleting others' posts)
+  const [deletePostReasonDialogOpen, setDeletePostReasonDialogOpen] = useState(false)
+  const [deletingPostWithReason, setDeletingPostWithReason] = useState<PostDto | null>(null)
+  const [deletePostReason, setDeletePostReason] = useState('')
+  const [deletePostReasonError, setDeletePostReasonError] = useState('')
 
   // Get current user - make it a state so it can be updated
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -344,6 +436,12 @@ export default function PostsManagement() {
       setError(null)
       const data = await fetchAllPosts()
       setPosts(data || [])
+      
+      // Auto-sync approval times cho các bài đã approved mà chưa có trong Firestore
+      // Điều này giúp các bài viết cũ (approved trước khi có code Firestore) cũng có approval time
+      if (data && data.length > 0) {
+        syncApprovalTimesForApprovedPosts(data)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tải danh sách bài viết')
       console.error('Error loading posts:', err)
@@ -353,11 +451,44 @@ export default function PostsManagement() {
     }
   }
 
+  // Sync approval times cho các bài đã approved mà chưa có trong Firestore
+  const syncApprovalTimesForApprovedPosts = async (posts: PostDto[]) => {
+    try {
+      // Lấy tất cả approval times hiện có từ Firestore
+      const existingTimes = await getAllApprovalTimesFromFirestore()
+      
+      // Tìm các bài đã approved nhưng chưa có approval time
+      const approvedPostsWithoutTime = posts.filter(post => {
+        const isApproved = post.status?.toLowerCase() === 'approved'
+        const hasApprovalTime = existingTimes[String(post.postId)]
+        return isApproved && !hasApprovalTime
+      })
+      
+      // Lưu approval time cho các bài này (sử dụng publicDate hoặc createdAt làm fallback)
+      for (const post of approvedPostsWithoutTime) {
+        await saveApprovalTimeToFirestore(post.postId)
+        console.log(`[PostsManagement] Synced approval time for post ${post.postId}`)
+      }
+      
+      if (approvedPostsWithoutTime.length > 0) {
+        console.log(`[PostsManagement] Synced ${approvedPostsWithoutTime.length} posts to Firestore`)
+      }
+    } catch (error) {
+      console.error('[PostsManagement] Error syncing approval times:', error)
+    }
+  }
+
   // Filter Posts - optimized
   const filteredPosts = useMemo(() => {
     if (posts.length === 0) return []
 
     let filtered = posts
+
+    // Loại bỏ bài viết Pending - những bài này sẽ được xem ở trang "Duyệt bài viết"
+    filtered = filtered.filter((post) => {
+      const postStatus = post.status?.toLowerCase() ?? ''
+      return postStatus !== 'pending'
+    })
 
     // Filter by status (fast)
     if (statusFilter !== 'All') {
@@ -382,6 +513,17 @@ export default function PostsManagement() {
         )
       })
     }
+
+    // Sort by approved time (from localStorage) first, then publicDate/createdAt - newest first
+    // Bài viết mới duyệt sẽ hiển thị lên đầu
+    filtered = [...filtered].sort((a, b) => {
+      // Ưu tiên thời gian phê duyệt từ localStorage
+      const approvedTimeA = getApprovedTime(a.postId)
+      const approvedTimeB = getApprovedTime(b.postId)
+      const dateA = new Date(approvedTimeA || a.publicDate || a.createdAt || 0).getTime()
+      const dateB = new Date(approvedTimeB || b.publicDate || b.createdAt || 0).getTime()
+      return dateB - dateA // Newest first
+    })
 
     return filtered
   }, [posts, searchText, statusFilter])
@@ -467,8 +609,17 @@ export default function PostsManagement() {
         images: imageUrls.length > 0 ? imageUrls : undefined
       }
 
-      await createPost(dto)
-      await loadPosts()
+      const newPost = await createPost(dto)
+      
+      // Thêm bài viết mới vào đầu danh sách thay vì reload
+      setPosts((prev) => [newPost, ...prev])
+      
+      setSnackbar({
+        open: true,
+        message: 'Tạo bài viết thành công!',
+        severity: 'success'
+      })
+      
       handleCloseCreateDialog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tạo bài viết')
@@ -551,7 +702,27 @@ export default function PostsManagement() {
       }
 
       await updatePost(editingPost.postId, dto)
-      await loadPosts()
+      
+      // Cập nhật bài viết trong state thay vì reload
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.postId === editingPost.postId
+            ? {
+                ...p,
+                title: editTitle.trim() || p.title,
+                content: editContent.trim() || p.content,
+                images: allImages.length > 0 ? allImages : p.images
+              }
+            : p
+        )
+      )
+      
+      setSnackbar({
+        open: true,
+        message: 'Cập nhật bài viết thành công!',
+        severity: 'success'
+      })
+      
       handleCloseEditDialog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể cập nhật bài viết')
@@ -563,14 +734,33 @@ export default function PostsManagement() {
 
   // Delete Post Handlers
   const handleOpenDeleteDialog = (post: PostDto) => {
-    setDeletingPost(post)
-    setDeleteDialogOpen(true)
+    // Kiểm tra xem có phải xóa bài của chính mình không
+    const isOwn = isOwnContent(post.authorId)
+    
+    if (isOwn) {
+      // Xóa bài của mình - không cần lý do
+      setDeletingPost(post)
+      setDeleteDialogOpen(true)
+    } else {
+      // Xóa bài của người khác - cần nhập lý do
+      setDeletingPostWithReason(post)
+      setDeletePostReason('')
+      setDeletePostReasonError('')
+      setDeletePostReasonDialogOpen(true)
+    }
     handleMenuClose(post.postId)
   }
 
   const handleCloseDeleteDialog = () => {
     setDeleteDialogOpen(false)
     setDeletingPost(null)
+  }
+
+  const handleCloseDeletePostReasonDialog = () => {
+    setDeletePostReasonDialogOpen(false)
+    setDeletingPostWithReason(null)
+    setDeletePostReason('')
+    setDeletePostReasonError('')
   }
 
   const handleDeletePost = async () => {
@@ -580,18 +770,41 @@ export default function PostsManagement() {
       setDeleting(true)
       await deletePost(deletingPost.postId)
 
-      // Remove from local state immediately for better UX
+      // Remove from local state immediately for better UX - không reload trang
       setPosts((prev) => prev.filter((p) => p.postId !== deletingPost.postId))
 
-      // Reload to ensure sync with backend
-      await loadPosts()
-
       handleCloseDeleteDialog()
+      setSnackbar({ open: true, message: 'Đã xóa bài viết', severity: 'success' })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể xóa bài viết')
       console.error('Error deleting post:', err)
-      // Reload on error to ensure state is correct
-      await loadPosts()
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleDeletePostWithReason = async () => {
+    if (!deletingPostWithReason) return
+
+    // Phải có lý do khi xóa bài của người khác
+    if (!deletePostReason.trim()) {
+      setDeletePostReasonError('Vui lòng nhập lý do xóa bài viết')
+      return
+    }
+
+    try {
+      setDeleting(true)
+      // TODO: Gửi deletePostReason đến backend để thông báo cho người dùng
+      await deletePost(deletingPostWithReason.postId)
+
+      // Remove from local state immediately for better UX - không reload trang
+      setPosts((prev) => prev.filter((p) => p.postId !== deletingPostWithReason.postId))
+
+      handleCloseDeletePostReasonDialog()
+      setSnackbar({ open: true, message: 'Đã xóa bài viết', severity: 'success' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không thể xóa bài viết')
+      console.error('Error deleting post:', err)
     } finally {
       setDeleting(false)
     }
@@ -615,7 +828,22 @@ export default function PostsManagement() {
     try {
       setReviewing(true)
       await approvePost(reviewingPost.postId)
-      await loadPosts()
+      
+      // Cập nhật status trong state thay vì reload
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.postId === reviewingPost.postId
+            ? { ...p, status: 'Approved', publicDate: new Date().toISOString() }
+            : p
+        )
+      )
+      
+      setSnackbar({
+        open: true,
+        message: 'Đã duyệt bài viết thành công!',
+        severity: 'success'
+      })
+      
       handleCloseApproveDialog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể duyệt bài viết')
@@ -644,7 +872,22 @@ export default function PostsManagement() {
     try {
       setReviewing(true)
       await rejectPost(reviewingPost.postId, rejectComment.trim())
-      await loadPosts()
+      
+      // Cập nhật status trong state thay vì reload
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.postId === reviewingPost.postId
+            ? { ...p, status: 'Rejected', rejectComment: rejectComment.trim() }
+            : p
+        )
+      )
+      
+      setSnackbar({
+        open: true,
+        message: 'Đã từ chối bài viết',
+        severity: 'success'
+      })
+      
       handleCloseRejectDialog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể từ chối bài viết')
@@ -855,12 +1098,19 @@ export default function PostsManagement() {
         setError(null) // Clear previous errors
         console.log('[PostsManagement] Loading comments for post:', postId)
         const comments = await fetchCommentsByPost(postId)
+        const totalCount = countTotalComments(comments)
         console.log('[PostsManagement] Loaded comments:', {
           postId,
-          count: comments.length,
+          parentCount: comments.length,
+          totalCount,
           comments
         })
         setPostComments((prev) => ({ ...prev, [postId]: comments }))
+        
+        // Update post comment count to reflect actual total (including replies)
+        setPosts((prev) =>
+          prev.map((p) => (p.postId === postId ? { ...p, commentsCount: totalCount } : p))
+        )
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Không thể tải bình luận'
         console.error('[PostsManagement] Error loading comments:', {
@@ -921,9 +1171,9 @@ export default function PostsManagement() {
       // Clear comment text
       setCommentTexts((prev) => ({ ...prev, [postId]: '' }))
 
-      // Update post comment count
+      // Update post comment count (including all replies)
       setPosts((prev) =>
-        prev.map((p) => (p.postId === postId ? { ...p, commentsCount: comments.length } : p))
+        prev.map((p) => (p.postId === postId ? { ...p, commentsCount: countTotalComments(comments) } : p))
       )
 
       // Show success message
@@ -939,6 +1189,51 @@ export default function PostsManagement() {
       setSnackbar({ open: true, message: errorMessage, severity: 'error' })
     } finally {
       setCreatingComment((prev) => ({ ...prev, [postId]: false }))
+    }
+  }
+
+  // Handle reply to comment
+  const handleStartReply = (postId: number, commentId: string, authorName: string) => {
+    setReplyingTo({ postId, commentId, authorName })
+    setReplyText('')
+  }
+
+  const handleCancelReply = () => {
+    setReplyingTo(null)
+    setReplyText('')
+  }
+
+  const handleSubmitReply = async () => {
+    if (!replyingTo || !replyText.trim() || !isAuthenticated) return
+
+    try {
+      setCreatingReply(true)
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await createComment({
+        postId: String(replyingTo.postId),
+        content: replyText.trim(),
+        parentCommentId: replyingTo.commentId
+      } as any)
+
+      // Reload comments
+      const comments = await fetchCommentsByPost(replyingTo.postId)
+      setPostComments((prev) => ({ ...prev, [replyingTo.postId]: comments }))
+
+      // Update post comment count (including all replies)
+      setPosts((prev) =>
+        prev.map((p) => (p.postId === replyingTo.postId ? { ...p, commentsCount: countTotalComments(comments) } : p))
+      )
+
+      // Clear reply state
+      setReplyingTo(null)
+      setReplyText('')
+      setSnackbar({ open: true, message: 'Đã trả lời bình luận', severity: 'success' })
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Không thể trả lời bình luận'
+      setSnackbar({ open: true, message: errorMessage, severity: 'error' })
+    } finally {
+      setCreatingReply(false)
     }
   }
 
@@ -980,25 +1275,45 @@ export default function PostsManagement() {
     }
   }
 
-  const handleDeleteComment = async (commentId: string, postId: number) => {
-    if (!window.confirm('Bạn có chắc muốn xóa bình luận này?')) return
+  const handleDeleteComment = async (commentId: string, postId: number, commentAuthorId?: number) => {
+    const isOwn = isOwnContent(commentAuthorId)
+    setDeletingCommentInfo({ commentId, postId, authorId: commentAuthorId, isOwnContent: isOwn })
+    setDeleteReason('')
+    setDeleteReasonError('')
+    setDeleteCommentDialogOpen(true)
+  }
+
+  const confirmDeleteComment = async () => {
+    if (!deletingCommentInfo) return
+    const { commentId, postId, isOwnContent: isOwn } = deletingCommentInfo
+
+    // Nếu xóa của người khác, phải có lý do
+    if (!isOwn && !deleteReason.trim()) {
+      setDeleteReasonError('Vui lòng nhập lý do xóa bình luận')
+      return
+    }
 
     try {
       setDeletingComment((prev) => new Set(prev).add(commentId))
+      setDeleteCommentDialogOpen(false)
+      
+      // TODO: Gửi deleteReason đến backend nếu cần thông báo cho người dùng
       await deleteComment(parseInt(commentId, 10))
 
       // Reload comments
       const comments = await fetchCommentsByPost(postId)
       setPostComments((prev) => ({ ...prev, [postId]: comments }))
 
-      // Update post comment count
+      // Update post comment count (including all replies)
       setPosts((prev) =>
         prev.map((p) =>
-          p.postId === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p
+          p.postId === postId ? { ...p, commentsCount: countTotalComments(comments) } : p
         )
       )
+      setSnackbar({ open: true, message: 'Đã xóa bình luận', severity: 'success' })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể xóa bình luận')
+      setSnackbar({ open: true, message: 'Không thể xóa bình luận', severity: 'error' })
       console.error('Error deleting comment:', err)
     } finally {
       setDeletingComment((prev) => {
@@ -1006,6 +1321,7 @@ export default function PostsManagement() {
         next.delete(commentId)
         return next
       })
+      setDeletingCommentInfo(null)
     }
   }
 
@@ -1032,8 +1348,8 @@ export default function PostsManagement() {
     return userIdNum === authorIdNum && userIdNum > 0
   }
 
-  // Admin có thể delete bất kỳ comment nào, user thường chỉ delete của mình
-  const canDeleteComment = (comment: PostComment) => {
+  // Admin có thể delete bất kỳ comment nào, user thường chỉ delete của mình hoặc comment trong bài của mình
+  const canDeleteComment = (comment: PostComment, post?: PostDto) => {
     // Admin có thể delete bất kỳ comment nào
     if (isAdmin) return true
 
@@ -1055,6 +1371,31 @@ export default function PostsManagement() {
         ? parseInt(String(commentAuthorId), 10)
         : Number(commentAuthorId)
 
+    // User có thể xóa comment của chính mình
+    if (userIdNum === authorIdNum && userIdNum > 0) return true
+
+    // Chủ bài post có thể xóa comment trong bài của mình
+    if (post) {
+      const postAuthorId = post.authorId ?? 0
+      const postAuthorIdNum = typeof postAuthorId === 'string' ? parseInt(postAuthorId, 10) : Number(postAuthorId)
+      if (userIdNum === postAuthorIdNum && userIdNum > 0) return true
+    }
+
+    return false
+  }
+
+  // Kiểm tra xem đây có phải là xóa content của chính mình không
+  const isOwnContent = (authorId: number | undefined) => {
+    if (!currentUser) return false
+    const userId =
+      currentUser?.id ??
+      currentUser?.Id ??
+      currentUser?.userId ??
+      currentUser?.UserId ??
+      currentUser?.ID ??
+      0
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
+    const authorIdNum = typeof authorId === 'string' ? parseInt(String(authorId), 10) : Number(authorId || 0)
     return userIdNum === authorIdNum && userIdNum > 0
   }
 
@@ -1119,6 +1460,165 @@ export default function PostsManagement() {
     if (!currentUserId) return false
     const currentUserIdStr = String(currentUserId)
     return comment.likes!.some((like) => String(like.accountId ?? '') === currentUserIdStr)
+  }
+
+  // Helper functions for reply likes
+  const getReplyLikesCount = (reply: PostCommentReply): number => {
+    return Array.isArray(reply.likes) ? reply.likes.length : 0
+  }
+
+  const isReplyLikedByCurrentUser = (reply: PostCommentReply): boolean => {
+    if (!currentUser || !Array.isArray(reply.likes) || reply.likes.length === 0) return false
+    const currentUserId =
+      currentUser?.id ??
+      currentUser?.Id ??
+      currentUser?.userId ??
+      currentUser?.UserId ??
+      currentUser?.ID ??
+      null
+    if (!currentUserId) return false
+    const currentUserIdStr = String(currentUserId)
+    return reply.likes!.some((like) => String(like.accountId ?? '') === currentUserIdStr)
+  }
+
+  // Handle toggle like for reply (reuse comment like API since replies are also comments)
+  const handleToggleReplyLike = async (postId: number, reply: PostCommentReply) => {
+    if (!isAuthenticated || !currentUser) {
+      const message = 'Vui lòng đăng nhập để thích bình luận'
+      setSnackbar({ open: true, message, severity: 'warning' })
+      return
+    }
+
+    const replyId = reply.replyPostCommentId
+    const userId = currentUser?.id ?? currentUser?.Id ?? currentUser?.userId ?? currentUser?.UserId ?? currentUser?.ID ?? null
+    
+    if (!userId) {
+      setSnackbar({ open: true, message: 'Không thể xác định người dùng', severity: 'error' })
+      return
+    }
+
+    // Create a fake PostComment object to reuse toggleCommentLike
+    const fakeComment: PostComment = {
+      postCommentId: replyId,
+      id: parseInt(replyId, 10) || undefined,
+      content: reply.content,
+      likes: reply.likes
+    }
+
+    try {
+      setLikingComments((prev) => new Set(prev).add(replyId))
+
+      // Call the API
+      await toggleCommentLike(fakeComment)
+
+      // Reload comments to get updated likes
+      const comments = await fetchCommentsByPost(postId)
+      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Không thể thích bình luận'
+      setSnackbar({ open: true, message: errorMessage, severity: 'error' })
+      console.error('Error toggling reply like:', err)
+    } finally {
+      setLikingComments((prev) => {
+        const next = new Set(prev)
+        next.delete(replyId)
+        return next
+      })
+    }
+  }
+
+  // Helper functions for reply permissions
+  const canEditReply = (reply: PostCommentReply) => {
+    if (!isAuthenticated || !currentUser) return false
+
+    const userId =
+      currentUser?.id ??
+      currentUser?.Id ??
+      currentUser?.userId ??
+      currentUser?.UserId ??
+      currentUser?.ID ??
+      0
+    const replyAuthorId = reply.authorId ?? 0
+
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
+    const authorIdNum = typeof replyAuthorId === 'string' ? parseInt(String(replyAuthorId), 10) : Number(replyAuthorId)
+
+    return userIdNum === authorIdNum && userIdNum > 0
+  }
+
+  const canDeleteReply = (reply: PostCommentReply) => {
+    // Admin có thể delete bất kỳ reply nào
+    if (isAdmin) return true
+
+    if (!isAuthenticated || !currentUser) return false
+
+    const userId =
+      currentUser?.id ??
+      currentUser?.Id ??
+      currentUser?.userId ??
+      currentUser?.UserId ??
+      currentUser?.ID ??
+      0
+    const replyAuthorId = reply.authorId ?? 0
+
+    const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
+    const authorIdNum = typeof replyAuthorId === 'string' ? parseInt(String(replyAuthorId), 10) : Number(replyAuthorId)
+
+    return userIdNum === authorIdNum && userIdNum > 0
+  }
+
+  const canEditOrDeleteReply = (reply: PostCommentReply) => {
+    return canEditReply(reply) || canDeleteReply(reply)
+  }
+
+  // Handle edit reply
+  const handleStartEditReply = (replyId: string, currentContent: string) => {
+    setEditingComments((prev) => ({ ...prev, [replyId]: currentContent }))
+  }
+
+  const handleCancelEditReply = (replyId: string) => {
+    setEditingComments((prev) => {
+      const next = { ...prev }
+      delete next[replyId]
+      return next
+    })
+  }
+
+  const handleUpdateReply = async (replyId: string, postId: number) => {
+    const content = editingComments[replyId]?.trim()
+    if (!content) return
+
+    try {
+      setUpdatingComment((prev) => new Set(prev).add(replyId))
+      await updateComment(parseInt(replyId, 10), { content })
+
+      // Reload comments
+      const comments = await fetchCommentsByPost(postId)
+      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+
+      // Clear editing state
+      handleCancelEditReply(replyId)
+      setSnackbar({ open: true, message: 'Đã cập nhật bình luận', severity: 'success' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không thể cập nhật bình luận')
+      setSnackbar({ open: true, message: 'Không thể cập nhật bình luận', severity: 'error' })
+      console.error('Error updating reply:', err)
+    } finally {
+      setUpdatingComment((prev) => {
+        const next = new Set(prev)
+        next.delete(replyId)
+        return next
+      })
+    }
+  }
+
+  // Handle delete reply
+  const handleDeleteReply = async (replyId: string, postId: number, replyAuthorId?: number) => {
+    const isOwn = isOwnContent(replyAuthorId)
+    setDeletingCommentInfo({ commentId: replyId, postId, authorId: replyAuthorId, isOwnContent: isOwn })
+    setDeleteReason('')
+    setDeleteReasonError('')
+    setDeleteCommentDialogOpen(true)
   }
 
   const handleToggleCommentLike = async (postId: number, comment: PostComment) => {
@@ -1216,6 +1716,219 @@ export default function PostsManagement() {
     }
   }
 
+  // Recursive function to render reply and its nested replies
+  const renderReply = (reply: PostCommentReply, postId: number, depth: number = 0): React.ReactNode => {
+    const maxDepth = 3 // Giới hạn độ sâu để tránh UI quá phức tạp
+    const marginLeft = Math.min(depth, maxDepth) * 2 // Tăng margin theo depth
+
+    return (
+      <Box key={reply.replyPostCommentId}>
+        <Box
+          sx={{
+            bgcolor: depth === 0 ? 'grey.50' : 'grey.100',
+            p: 1.5,
+            borderRadius: 2,
+            borderLeft: '3px solid',
+            borderColor: depth === 0 ? 'primary.light' : 'secondary.light',
+            ml: marginLeft
+          }}
+        >
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Avatar
+                src={reply.authorAvatar}
+                sx={{ width: 28, height: 28, fontSize: '0.8rem', bgcolor: 'primary.main' }}
+              >
+                {reply.fullName?.charAt(0).toUpperCase() || 'U'}
+              </Avatar>
+              <Box display="flex" alignItems="center" gap={0.5} flexWrap="wrap">
+                <Typography variant="body2" fontWeight="bold">
+                  {reply.fullName}
+                </Typography>
+                {reply.replyToName && (
+                  <>
+                    <Typography variant="body2" color="text.secondary">
+                      trả lời
+                    </Typography>
+                    <Typography variant="body2" fontWeight="bold" color="primary.main">
+                      {reply.replyToName}
+                    </Typography>
+                  </>
+                )}
+                <Typography variant="caption" color="text.secondary">
+                  {formatTimeAgo(reply.createdDate)}
+                </Typography>
+              </Box>
+            </Box>
+            {/* Edit/Delete buttons for reply */}
+            {canEditOrDeleteReply(reply) && (
+              <Box display="flex" gap={0.5}>
+                {canEditReply(reply) && (
+                  <IconButton
+                    size="small"
+                    onClick={() => handleStartEditReply(reply.replyPostCommentId, reply.content || '')}
+                    disabled={updatingComment.has(reply.replyPostCommentId) || deletingComment.has(reply.replyPostCommentId)}
+                    sx={{ p: 0.5 }}
+                    title="Chỉnh sửa"
+                  >
+                    <EditIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                )}
+                {canDeleteReply(reply) && (
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDeleteReply(reply.replyPostCommentId, postId)}
+                    disabled={deletingComment.has(reply.replyPostCommentId)}
+                    sx={{ p: 0.5, color: 'error.main' }}
+                    title="Xóa"
+                  >
+                    {deletingComment.has(reply.replyPostCommentId) ? (
+                      <CircularProgress size={14} color="error" />
+                    ) : (
+                      <DeleteIcon sx={{ fontSize: 16 }} />
+                    )}
+                  </IconButton>
+                )}
+              </Box>
+            )}
+          </Box>
+          {/* Reply content - show edit mode or normal content */}
+          {editingComments[reply.replyPostCommentId] !== undefined ? (
+            <Box sx={{ ml: 4.5, mb: 0.5 }}>
+              <TextField
+                fullWidth
+                size="small"
+                value={editingComments[reply.replyPostCommentId]}
+                onChange={(e) => setEditingComments((prev) => ({ ...prev, [reply.replyPostCommentId]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleUpdateReply(reply.replyPostCommentId, postId)
+                  }
+                  if (e.key === 'Escape') {
+                    handleCancelEditReply(reply.replyPostCommentId)
+                  }
+                }}
+                multiline
+                maxRows={3}
+                autoFocus
+                sx={{ bgcolor: 'white' }}
+              />
+              <Box display="flex" gap={1} mt={0.5} justifyContent="flex-end">
+                <Button
+                  size="small"
+                  onClick={() => handleCancelEditReply(reply.replyPostCommentId)}
+                  disabled={updatingComment.has(reply.replyPostCommentId)}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={() => handleUpdateReply(reply.replyPostCommentId, postId)}
+                  disabled={!editingComments[reply.replyPostCommentId]?.trim() || updatingComment.has(reply.replyPostCommentId)}
+                >
+                  {updatingComment.has(reply.replyPostCommentId) ? <CircularProgress size={16} /> : 'Lưu'}
+                </Button>
+              </Box>
+            </Box>
+          ) : (
+            <Typography variant="body2" sx={{ ml: 4.5, mb: 0.5 }}>
+              {reply.content}
+            </Typography>
+          )}
+          {/* Like and Reply buttons for reply */}
+          <Box display="flex" alignItems="center" gap={1.5} ml={4.5}>
+            <IconButton
+              size="small"
+              onClick={() => handleToggleReplyLike(postId, reply)}
+              disabled={!isAuthenticated || likingComments.has(reply.replyPostCommentId)}
+              sx={{
+                color: isReplyLikedByCurrentUser(reply) ? 'error.main' : 'text.secondary',
+                p: 0.5
+              }}
+            >
+              <FavoriteIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              onClick={() => {
+                const likesCount = getReplyLikesCount(reply)
+                if (likesCount > 0) {
+                  setSelectedCommentLikes(reply.likes || [])
+                  setSelectedCommentContent(reply.content || 'Bình luận')
+                  setCommentLikesDialogOpen(true)
+                }
+              }}
+              sx={{
+                cursor: getReplyLikesCount(reply) > 0 ? 'pointer' : 'default',
+                '&:hover':
+                  getReplyLikesCount(reply) > 0
+                    ? { textDecoration: 'underline', color: 'primary.main' }
+                    : {}
+              }}
+            >
+              {getReplyLikesCount(reply)} thích
+            </Typography>
+            <Typography
+              variant="caption"
+              color="primary.main"
+              onClick={() => handleStartReply(postId, reply.replyPostCommentId, reply.fullName)}
+              sx={{
+                cursor: 'pointer',
+                fontWeight: 600,
+                '&:hover': { textDecoration: 'underline' }
+              }}
+            >
+              Trả lời
+            </Typography>
+          </Box>
+          {/* Reply input for this reply */}
+          {replyingTo?.commentId === reply.replyPostCommentId && (
+            <Box mt={1.5} ml={4.5}>
+              <Box display="flex" gap={1} alignItems="flex-start">
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder={`Trả lời ${replyingTo.authorName}...`}
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSubmitReply()
+                    }
+                  }}
+                  multiline
+                  maxRows={3}
+                  sx={{ bgcolor: 'white' }}
+                />
+                <IconButton
+                  size="small"
+                  color="primary"
+                  onClick={handleSubmitReply}
+                  disabled={!replyText.trim() || creatingReply}
+                >
+                  {creatingReply ? <CircularProgress size={16} /> : <SendIcon fontSize="small" />}
+                </IconButton>
+                <IconButton size="small" onClick={handleCancelReply}>
+                  <CancelIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+          )}
+        </Box>
+        {/* Render nested replies recursively */}
+        {reply.replies && reply.replies.length > 0 && (
+          <Box mt={1} display="flex" flexDirection="column" gap={1}>
+            {reply.replies.map((nestedReply) => renderReply(nestedReply, postId, depth + 1))}
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
@@ -1295,7 +2008,6 @@ export default function PostsManagement() {
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               <MenuItem value="All">Tất cả</MenuItem>
-              <MenuItem value="Pending">Đang chờ</MenuItem>
               <MenuItem value="Approved">Đã duyệt</MenuItem>
               <MenuItem value="Rejected">Đã từ chối</MenuItem>
             </Select>
@@ -1411,7 +2123,7 @@ export default function PostsManagement() {
                           color="text.secondary"
                           sx={{ fontSize: '0.875rem' }}
                         >
-                          {formatTimeAgo(post.createdAt)}
+                          {formatTimeAgo(post.publicDate || post.createdAt, post.postId)}
                         </Typography>
                       </Box>
                     </Box>
@@ -1752,10 +2464,10 @@ export default function PostsManagement() {
                                         <EditIcon fontSize="small" />
                                       </IconButton>
                                     )}
-                                    {canDeleteComment(comment) && (
+                                    {canDeleteComment(comment, post) && (
                                       <IconButton
                                         size="small"
-                                        onClick={() => handleDeleteComment(commentId, post.postId)}
+                                        onClick={() => handleDeleteComment(commentId, post.postId, comment.authorId)}
                                         disabled={deletingComment.has(commentId)}
                                         sx={{ color: 'error.main' }}
                                       >
@@ -1850,7 +2562,72 @@ export default function PostsManagement() {
                                     >
                                       {getCommentLikesCount(comment)} lượt thích
                                     </Typography>
+                                    {isAuthenticated && (
+                                      <Typography
+                                        variant="caption"
+                                        color="primary.main"
+                                        onClick={() => handleStartReply(post.postId, commentId, getCommentAuthorName(comment))}
+                                        sx={{
+                                          cursor: 'pointer',
+                                          fontWeight: 500,
+                                          '&:hover': {
+                                            textDecoration: 'underline'
+                                          }
+                                        }}
+                                      >
+                                        Trả lời
+                                      </Typography>
+                                    )}
                                   </Box>
+                                  
+                                  {/* Reply Input */}
+                                  {replyingTo?.commentId === commentId && (
+                                    <Box mt={1.5} ml={4}>
+                                      <Box display="flex" gap={1} alignItems="flex-start">
+                                        <TextField
+                                          fullWidth
+                                          size="small"
+                                          placeholder={`Trả lời ${replyingTo.authorName}...`}
+                                          value={replyText}
+                                          onChange={(e) => setReplyText(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                              e.preventDefault()
+                                              handleSubmitReply()
+                                            }
+                                          }}
+                                          multiline
+                                          maxRows={3}
+                                          sx={{ bgcolor: 'white' }}
+                                        />
+                                        <IconButton
+                                          size="small"
+                                          color="primary"
+                                          onClick={handleSubmitReply}
+                                          disabled={!replyText.trim() || creatingReply}
+                                        >
+                                          {creatingReply ? (
+                                            <CircularProgress size={16} />
+                                          ) : (
+                                            <SendIcon fontSize="small" />
+                                          )}
+                                        </IconButton>
+                                        <IconButton
+                                          size="small"
+                                          onClick={handleCancelReply}
+                                        >
+                                          <CancelIcon fontSize="small" />
+                                        </IconButton>
+                                      </Box>
+                                    </Box>
+                                  )}
+                                  
+                                  {/* Display Replies */}
+                                  {comment.replies && comment.replies.length > 0 && (
+                                    <Box mt={1.5} ml={4} display="flex" flexDirection="column" gap={1.5}>
+                                      {comment.replies.map((reply) => renderReply(reply, post.postId, 0))}
+                                    </Box>
+                                  )}
                                 </>
                               )}
                             </Box>
@@ -2253,7 +3030,7 @@ export default function PostsManagement() {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Dialog */}
+      {/* Delete Dialog (for own posts - no reason required) */}
       <Dialog
         open={deleteDialogOpen}
         onClose={handleCloseDeleteDialog}
@@ -2290,6 +3067,64 @@ export default function PostsManagement() {
             }}
           >
             {deleting ? <CircularProgress size={20} color="inherit" /> : 'Xóa'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Post with Reason Dialog (for others' posts - reason required) */}
+      <Dialog
+        open={deletePostReasonDialogOpen}
+        onClose={handleCloseDeletePostReasonDialog}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2
+          }
+        }}
+      >
+        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold' }}>
+          Xóa bài viết của người khác
+        </DialogTitle>
+        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
+          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem', mb: 2 }}>
+            Bạn đang xóa bài viết của <strong>{deletingPostWithReason?.authorName}</strong>. 
+            Vui lòng nhập lý do để thông báo cho họ.
+          </DialogContentText>
+          <TextField
+            fullWidth
+            label="Lý do xóa bài viết *"
+            placeholder="Nhập lý do xóa bài viết..."
+            multiline
+            rows={3}
+            value={deletePostReason}
+            onChange={(e) => {
+              setDeletePostReason(e.target.value)
+              setDeletePostReasonError('')
+            }}
+            error={!!deletePostReasonError}
+            helperText={deletePostReasonError}
+          />
+        </DialogContent>
+        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
+          <Button onClick={handleCloseDeletePostReasonDialog} sx={{ color: 'text.secondary' }}>
+            Hủy
+          </Button>
+          <Button
+            onClick={handleDeletePostWithReason}
+            variant="contained"
+            disabled={deleting}
+            sx={{
+              bgcolor: 'error.main',
+              '&:hover': {
+                bgcolor: 'error.dark'
+              },
+              '&:disabled': {
+                bgcolor: 'grey.300'
+              }
+            }}
+          >
+            {deleting ? <CircularProgress size={20} color="inherit" /> : 'Xóa bài viết'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -2531,6 +3366,7 @@ export default function PostsManagement() {
                   }}
                 >
                   <Avatar
+                    src={like.avatar}
                     sx={{
                       width: 40,
                       height: 40,
@@ -2560,6 +3396,77 @@ export default function PostsManagement() {
             </Box>
           )}
         </DialogContent>
+      </Dialog>
+
+      {/* Delete Comment Confirm Dialog */}
+      <Dialog
+        open={deleteCommentDialogOpen}
+        onClose={() => {
+          setDeleteCommentDialogOpen(false)
+          setDeletingCommentInfo(null)
+        }}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            p: 1
+          }
+        }}
+      >
+        <DialogTitle sx={{ pb: 1, fontWeight: 600 }}>
+          Xác nhận xóa bình luận
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: deletingCommentInfo?.isOwnContent ? 0 : 2 }}>
+            Bạn có chắc muốn xóa bình luận này? Hành động này không thể hoàn tác.
+          </DialogContentText>
+          {/* Hiển thị input lý do nếu xóa comment của người khác */}
+          {deletingCommentInfo && !deletingCommentInfo.isOwnContent && (
+            <TextField
+              fullWidth
+              label="Lý do xóa bình luận *"
+              placeholder="Nhập lý do xóa để thông báo cho người dùng..."
+              multiline
+              rows={2}
+              value={deleteReason}
+              onChange={(e) => {
+                setDeleteReason(e.target.value)
+                setDeleteReasonError('')
+              }}
+              error={!!deleteReasonError}
+              helperText={deleteReasonError}
+              sx={{ mt: 2 }}
+            />
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setDeleteCommentDialogOpen(false)
+              setDeletingCommentInfo(null)
+              setDeleteReason('')
+              setDeleteReasonError('')
+            }}
+            variant="outlined"
+            sx={{ borderRadius: 2 }}
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={confirmDeleteComment}
+            variant="contained"
+            color="error"
+            sx={{ borderRadius: 2 }}
+            disabled={deletingCommentInfo ? deletingComment.has(deletingCommentInfo.commentId) : false}
+          >
+            {deletingCommentInfo && deletingComment.has(deletingCommentInfo.commentId) ? (
+              <CircularProgress size={20} color="inherit" />
+            ) : (
+              'Xóa'
+            )}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* Snackbar for notifications */}

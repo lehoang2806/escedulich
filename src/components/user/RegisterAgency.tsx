@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Header from './Header'
 import Footer from './Footer'
@@ -8,12 +8,13 @@ import { requestAgencyUpgrade } from '~/api/user/instances/RoleUpgradeApi'
 import { uploadImageToFirebase } from '~/services/firebaseStorage'
 import axiosInstance from '~/utils/axiosInstance'
 import { API_ENDPOINTS } from '~/config/api'
-import { 
+import {
   ArrowLeftIcon,
   ArrowRightIcon,
-  UploadIcon, 
+  UploadIcon,
   FileTextIcon,
-  AlertCircleIcon
+  AlertCircleIcon,
+  CheckCircleIcon
 } from './icons/index'
 import './RegisterAgency.css'
 
@@ -48,6 +49,24 @@ const RegisterAgency = () => {
   const [loading, setLoading] = useState(false)
   const [licensePreview, setLicensePreview] = useState<string | null>(null)
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+  const [isAlreadyUpgraded, setIsAlreadyUpgraded] = useState(false)
+
+  // Kiểm tra role khi component mount
+  useEffect(() => {
+    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+    if (userInfoStr) {
+      try {
+        const userInfo = JSON.parse(userInfoStr)
+        const roleId = userInfo.RoleId || userInfo.roleId
+        // RoleId 2 = Host, RoleId 3 = Agency
+        if (roleId === 2 || roleId === 3) {
+          setIsAlreadyUpgraded(true)
+        }
+      } catch (e) {
+        console.error('Error parsing userInfo:', e)
+      }
+    }
+  }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -259,7 +278,36 @@ const RegisterAgency = () => {
             </div>
           </div>
 
-          {/* Form */}
+          {/* Hiển thị thông báo nếu đã nâng cấp rồi */}
+          {isAlreadyUpgraded ? (
+            <Card className="reg-agency-register-agency-form-card">
+              <CardContent>
+                <div className="reg-agency-pending-alert" style={{
+                  textAlign: 'center',
+                  padding: '3rem 2rem'
+                }}>
+                  <CheckCircleIcon style={{ width: '64px', height: '64px', color: '#10b981', marginBottom: '1rem' }} />
+                  <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.5rem' }}>
+                    Đã nâng cấp tài khoản
+                  </h2>
+                  <p style={{ color: '#6b7280', marginBottom: '0.5rem' }}>
+                    Bạn đã nâng cấp chức năng cho tài khoản của mình rồi!
+                  </p>
+                  <p style={{ color: '#9ca3af', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+                    Mời bạn về trang chủ để tiếp tục sử dụng các tính năng của hệ thống.
+                  </p>
+                  <Button
+                    variant="default"
+                    size="lg"
+                    onClick={() => navigate('/')}
+                  >
+                    Về trang chủ
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+          /* Form */
           <Card className="reg-agency-register-agency-form-card">
             <CardContent>
               <form onSubmit={handleSubmit} className="reg-agency-register-agency-form">
@@ -463,13 +511,14 @@ const RegisterAgency = () => {
                   <div className="reg-agency-form-note">
                     <FileTextIcon className="reg-agency-note-icon" />
                     <div>
-                      <strong>Lưu ý:</strong> Sau khi gửi yêu cầu, bạn sẽ cần thanh toán phí nâng cấp 1,000,000 VNĐ. 
+                      <strong>Lưu ý:</strong> Sau khi gửi yêu cầu, bạn sẽ cần thanh toán phí nâng cấp 1,000,000 VNĐ.
                       Yêu cầu của bạn sẽ được Admin xét duyệt trong vòng 1-3 ngày làm việc.
                     </div>
                   </div>
                 </form>
               </CardContent>
             </Card>
+          )}
         </div>
       </main>
       <Footer />

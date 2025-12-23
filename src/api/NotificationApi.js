@@ -8,7 +8,7 @@ export const markNotificationAsRead = async (notificationId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/notification/Read/${notificationId}`, {
+  const response = await fetch(`${backend_url}/api/notification/read/${notificationId}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -52,7 +52,7 @@ export const deleteNotification = async (notificationId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/notification/Delete/${notificationId}`, {
+  const response = await fetch(`${backend_url}/api/notification/delete/${notificationId}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,

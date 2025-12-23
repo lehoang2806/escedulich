@@ -1,9 +1,9 @@
 import './CreateCoupon.css';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { createCoupon } from '../api/CouponApi';
+import { createCoupon } from '../API/CouponApi';
 import Header from './Header';
-import { getCurrentUser } from '../api/SocialMediaApi';
+import { getCurrentUser } from '../API/SocialMediaApi';
 
 const CreateCoupon = () => {
   // State management - matching database schema

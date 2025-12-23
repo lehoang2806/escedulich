@@ -18,7 +18,7 @@ export const createService = async (formData) => {
     Price: parseFloat(formData.get('price') || '0'),
     HostId: hostId
   };
-  const res = await fetch(`${backend_url}/api/Service`, {
+  const res = await fetch(`${backend_url}/api/service`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -35,7 +35,7 @@ export const getMyServices = async () => {
   if (userInfo) {
     try { const u = JSON.parse(userInfo); userId = u.Id || u.id; } catch {}
   }
-  const res = await fetch(`${backend_url}/api/Service`, {
+  const res = await fetch(`${backend_url}/api/service`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) throw new Error(await res.text() || 'Failed to load services');
@@ -46,7 +46,7 @@ export const getMyServices = async () => {
 export const getAllServices = async () => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/Service`, {
+  const res = await fetch(`${backend_url}/api/service`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) throw new Error(await res.text() || 'Failed to load services');
@@ -57,7 +57,7 @@ export const getAllServices = async () => {
 export const getServiceById = async (serviceId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
-  const res = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const res = await fetch(`${backend_url}/api/service/${serviceId}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) throw new Error(await res.text() || 'Failed to load service');
@@ -72,7 +72,7 @@ export const updateService = async (formData) => {
   const body = formData instanceof FormData
     ? { Id: parseInt(serviceId), Name: formData.get('name') || '', Description: formData.get('description') || '', Price: parseFloat(formData.get('price') || 0) }
     : { Id: parseInt(serviceId), Name: formData.name || '', Description: formData.description || '', Price: parseFloat(formData.price || 0) };
-  const res = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const res = await fetch(`${backend_url}/api/service/${serviceId}`, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -84,7 +84,7 @@ export const updateService = async (formData) => {
 export const deleteService = async (serviceId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
-  const res = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const res = await fetch(`${backend_url}/api/service/${serviceId}`, {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${token}` }
   });
@@ -96,7 +96,7 @@ export const deleteService = async (serviceId) => {
 export const addServiceToCombo = async (comboId, serviceId, quantity = 1) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/ServiceComboDetail`, {
+  const res = await fetch(`${backend_url}/api/servicecombodetail`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ServiceComboId: comboId, ServiceId: serviceId, Quantity: quantity })
@@ -108,7 +108,7 @@ export const addServiceToCombo = async (comboId, serviceId, quantity = 1) => {
 export const getServiceComboDetailByComboAndService = async (comboId, serviceId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/ServiceComboDetail/combo/${comboId}`, {
+  const res = await fetch(`${backend_url}/api/servicecombodetail/combo/${comboId}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) throw new Error(await res.text() || 'Failed to load service combo details');
@@ -121,7 +121,7 @@ export const getServiceComboDetailByComboAndService = async (comboId, serviceId)
 export const updateServiceComboDetail = async (detailId, comboId, serviceId, quantity) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/ServiceComboDetail/${detailId}`, {
+  const res = await fetch(`${backend_url}/api/servicecombodetail/${detailId}`, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ServiceComboId: comboId, ServiceId: serviceId, Quantity: quantity })
@@ -133,7 +133,7 @@ export const updateServiceComboDetail = async (detailId, comboId, serviceId, qua
 export const deleteServiceComboDetail = async (detailId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/ServiceComboDetail/${detailId}`, {
+  const res = await fetch(`${backend_url}/api/servicecombodetail/${detailId}`, {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${token}` }
   });
@@ -145,7 +145,7 @@ export const deleteServiceComboDetail = async (detailId) => {
 export const getServiceComboDetailsByComboId = async (comboId) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required.');
-  const res = await fetch(`${backend_url}/api/ServiceComboDetail/combo/${comboId}`, {
+  const res = await fetch(`${backend_url}/api/servicecombodetail/combo/${comboId}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) throw new Error(await res.text() || 'Failed to load service combo details');

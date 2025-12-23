@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Header from './Header'
 import Footer from './Footer'
@@ -6,10 +6,10 @@ import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
 import { requestHostUpgrade } from '~/api/user/instances/RoleUpgradeApi'
 import { uploadImageToFirebase } from '~/services/firebaseStorage'
-import { 
+import {
   ArrowLeftIcon,
   ArrowRightIcon,
-  UploadIcon, 
+  UploadIcon,
   FileTextIcon,
   AlertCircleIcon,
   CheckCircleIcon
@@ -44,6 +44,24 @@ const RegisterHost = () => {
   const [loading, setLoading] = useState(false)
   const [licensePreview, setLicensePreview] = useState<string | null>(null)
   const [hasPendingRequest, setHasPendingRequest] = useState(false)
+  const [isAlreadyUpgraded, setIsAlreadyUpgraded] = useState(false)
+
+  // Kiểm tra role khi component mount
+  useEffect(() => {
+    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+    if (userInfoStr) {
+      try {
+        const userInfo = JSON.parse(userInfoStr)
+        const roleId = userInfo.RoleId || userInfo.roleId
+        // RoleId 2 = Host, RoleId 3 = Agency
+        if (roleId === 2 || roleId === 3) {
+          setIsAlreadyUpgraded(true)
+        }
+      } catch (e) {
+        console.error('Error parsing userInfo:', e)
+      }
+    }
+  }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -205,8 +223,31 @@ const RegisterHost = () => {
             </div>
           </div>
 
-          {/* Hiển thị thông báo nếu đã có yêu cầu pending */}
-          {hasPendingRequest ? (
+          {/* Hiển thị thông báo nếu đã nâng cấp rồi */}
+          {isAlreadyUpgraded ? (
+            <Card className="reg-host-register-host-form-card">
+              <CardContent>
+                <div className="reg-host-pending-request-notice">
+                  <CheckCircleIcon className="reg-host-pending-icon" style={{ color: '#10b981' }} />
+                  <h2 className="reg-host-pending-title">Đã nâng cấp tài khoản</h2>
+                  <p className="reg-host-pending-message">
+                    Bạn đã nâng cấp chức năng cho tài khoản của mình rồi!
+                  </p>
+                  <p className="reg-host-pending-note">
+                    Mời bạn về trang chủ để tiếp tục sử dụng các tính năng của hệ thống.
+                  </p>
+                  <Button
+                    variant="default"
+                    size="lg"
+                    onClick={() => navigate('/')}
+                    className="reg-host-back-to-profile-button"
+                  >
+                    Về trang chủ
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : hasPendingRequest ? (
             <Card className="reg-host-register-host-form-card">
               <CardContent>
                 <div className="reg-host-pending-request-notice">

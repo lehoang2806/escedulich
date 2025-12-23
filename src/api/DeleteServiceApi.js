@@ -9,7 +9,7 @@ export const deleteService = async (serviceId) => {
     throw new Error('Authentication required');
   }
 
-  const response = await fetch(`${backend_url}/api/Service/${serviceId}`, {
+  const response = await fetch(`${backend_url}/api/service/${serviceId}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,

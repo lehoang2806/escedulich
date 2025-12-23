@@ -1,12 +1,12 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Header from './Header'
 import Footer from './Footer'
 import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
 import Badge from './ui/Badge'
-import { 
-  CheckCircleIcon, 
+import {
+  CheckCircleIcon,
   ArrowRightIcon,
   ShieldCheckIcon,
   CreditCardIcon,
@@ -28,6 +28,24 @@ interface UpgradeOption {
 
 const UpgradeAccount = () => {
   const navigate = useNavigate()
+  const [isAlreadyUpgraded, setIsAlreadyUpgraded] = useState(false)
+
+  // Kiểm tra role khi component mount
+  useEffect(() => {
+    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+    if (userInfoStr) {
+      try {
+        const userInfo = JSON.parse(userInfoStr)
+        const roleId = userInfo.RoleId || userInfo.roleId
+        // RoleId 2 = Host, RoleId 3 = Agency
+        if (roleId === 2 || roleId === 3) {
+          setIsAlreadyUpgraded(true)
+        }
+      } catch (e) {
+        console.error('Error parsing userInfo:', e)
+      }
+    }
+  }, [])
 
   const upgradeOptions: UpgradeOption[] = [
     {
@@ -88,6 +106,35 @@ const UpgradeAccount = () => {
     <div className="upg-upgrade-account-page">
       <Header />
       <main className="upg-upgrade-account-main">
+        {/* Hiển thị thông báo nếu đã nâng cấp rồi */}
+        {isAlreadyUpgraded ? (
+          <div className="upg-upgrade-account-container" style={{ paddingTop: '4rem', paddingBottom: '4rem' }}>
+            <Card style={{ maxWidth: '600px', margin: '0 auto' }}>
+              <CardContent style={{ textAlign: 'center', padding: '3rem 2rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <CheckCircleIcon style={{ width: '80px', height: '80px', color: '#10b981', marginBottom: '1.5rem' }} />
+                <h2 style={{ fontSize: '1.75rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem' }}>
+                  Đã nâng cấp tài khoản
+                </h2>
+                <p style={{ color: '#6b7280', fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+                  Bạn đã nâng cấp chức năng cho tài khoản của mình rồi!
+                </p>
+                <p style={{ color: '#9ca3af', marginBottom: '2rem' }}>
+                  Mời bạn về trang chủ để tiếp tục sử dụng các tính năng của hệ thống.
+                </p>
+                <Button
+                  variant="default"
+                  size="lg"
+                  onClick={() => navigate('/')}
+                  style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: 'none' }}
+                >
+                  Về trang chủ
+                  <ArrowRightIcon className="upg-button-icon" />
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+        <>
         {/* Hero Section */}
         <section className="upg-upgrade-page-header">
           <div className="upg-upgrade-header-container">
@@ -172,6 +219,8 @@ const UpgradeAccount = () => {
             </div>
           </section>
         </div>
+        </>
+        )}
       </main>
       <Footer />
     </div>

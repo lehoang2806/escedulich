@@ -11,7 +11,7 @@ export const createServiceCombo = async (serviceComboData) => {
       throw new Error('Authentication required. Please log in again.');
     }
 
-    const response = await fetch(`${backend_url}/api/ServiceCombo`, {
+    const response = await fetch(`${backend_url}/api/servicecombo`, {
       method: "POST",
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -81,7 +81,7 @@ export const getMyServiceCombos = async () => {
     throw new Error('Authentication required. Please log in again.');
   }
 
-  const response = await fetch(`${backend_url}/api/ServiceCombo/mine`, {
+  const response = await fetch(`${backend_url}/api/servicecombo/mine`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -108,7 +108,7 @@ export const getServicesByComboId = async (comboId) => {
       throw new Error('Authentication required. Please log in again.');
     }
 
-    const response = await fetch(`${backend_url}/api/ServiceComboDetail/combo/${comboId}`, {
+    const response = await fetch(`${backend_url}/api/servicecombodetail/combo/${comboId}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,

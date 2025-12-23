@@ -38,7 +38,7 @@ const BookingConfirmationModal: React.FC<BookingConfirmationModalProps> = ({
     if (modalData.action === 'accept') {
       return 'Bạn có chắc chắn muốn chấp nhận booking này?';
     } else if (modalData.action === 'reject') {
-      return 'Bạn có chắc chắn muốn từ chối booking này?';
+      return 'Bạn có chắc chắn muốn từ chối đơn này? Nếu từ chối bạn rất có thể sẽ bị khóa tài khoản tùy theo lý do từ chối.';
     } else if (modalData.action === 'complete') {
       return 'Bạn có chắc chắn muốn đánh dấu booking này là đã hoàn thành?';
     }
@@ -58,17 +58,43 @@ const BookingConfirmationModal: React.FC<BookingConfirmationModalProps> = ({
         <div className="booking-confirmation-modal-body">
           <p style={{ marginBottom: '1rem' }}>{getMessage()}</p>
           
+          {/* Cảnh báo đặc biệt cho action reject */}
+          {modalData.action === 'reject' && (
+            <div style={{
+              backgroundColor: '#fef2f2',
+              border: '2px solid #ef4444',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px'
+            }}>
+              <span style={{ fontSize: '20px', flexShrink: 0 }}>⚠️</span>
+              <p style={{ 
+                margin: 0, 
+                fontSize: '13px', 
+                color: '#991b1b',
+                lineHeight: '1.5',
+                fontWeight: '500'
+              }}>
+                Lưu ý: Việc từ chối booking có thể ảnh hưởng đến uy tín của bạn. Admin sẽ xem xét lý do từ chối và có thể khóa tài khoản nếu phát hiện vi phạm.
+              </p>
+            </div>
+          )}
+          
           <div className="booking-confirmation-field">
             <label htmlFor="booking-notes-input">
-              Ghi chú:
+              {modalData.action === 'reject' ? 'Lý do từ chối (bắt buộc):' : 'Ghi chú:'}
             </label>
             <textarea
               id="booking-notes-input"
               value={modalData.notes}
               onChange={(e) => onModalDataChange({ ...modalData, notes: e.target.value })}
               rows={4}
-              placeholder="Nhập ghi chú (tùy chọn)..."
+              placeholder={modalData.action === 'reject' ? 'Vui lòng nhập lý do từ chối...' : 'Nhập ghi chú (tùy chọn)...'}
               className="booking-confirmation-textarea"
+              style={modalData.action === 'reject' ? { borderColor: '#ef4444' } : {}}
             />
           </div>
         </div>

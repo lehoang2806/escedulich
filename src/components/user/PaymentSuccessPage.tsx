@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import Header from './Header'
+import ConditionalHeader from './ConditionalHeader'
 import Footer from './Footer'
 import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
@@ -70,6 +70,12 @@ const PaymentSuccessPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [ensuredStatus, setEnsuredStatus] = useState(false)
   const [paymentChecked, setPaymentChecked] = useState(false)
+  const [totalSpentUpdated, setTotalSpentUpdated] = useState(false)
+
+  // Trigger Header re-check auth khi page load (sau khi redirect từ PayOS)
+  useEffect(() => {
+    window.dispatchEvent(new Event('userStorageChange'))
+  }, [])
 
   // QUAN TRỌNG: Tự động check và update payment status từ PayOS khi có orderCode
   // Sử dụng polling với retry và fallback đến localhost để đảm bảo payment được cập nhật
@@ -249,32 +255,90 @@ const PaymentSuccessPage = () => {
     fetchData()
   }, [bookingId, navigate])
 
-  // Ensure booking status is marked as success/completed in backend when viewing success page
+  // Ensure booking status is marked as paid in backend when viewing success page
+  // QUAN TRỌNG: Sau khi thanh toán, status chỉ là "paid" (đã thanh toán, chờ host xác nhận)
+  // Chỉ khi host xác nhận và hoàn thành dịch vụ thì mới là "completed" (có thể đánh giá)
   useEffect(() => {
     const ensureStatus = async () => {
       if (!bookingId || ensuredStatus || !booking) return
       try {
         const status = booking.Status || booking.status || ''
         const normalized = status.toLowerCase()
-        const alreadyCompleted = ['completed', 'success'].includes(normalized)
-        if (alreadyCompleted) {
+        // Nếu đã paid, confirmed hoặc completed thì không cần cập nhật
+        const alreadyProcessed = ['paid', 'confirmed', 'completed', 'success'].includes(normalized)
+        if (alreadyProcessed) {
           setEnsuredStatus(true)
           return
         }
         // Backend BookingController.UpdateStatus expects plain string body
-        await axiosInstance.put(`${API_ENDPOINTS.BOOKING}/${bookingId}/status`, 'completed')
+        // Chỉ set thành "paid" - host sẽ xác nhận và hoàn thành sau
+        await axiosInstance.put(`${API_ENDPOINTS.BOOKING}/${bookingId}/status`, 'paid')
         setEnsuredStatus(true)
       } catch (err) {
-        console.warn('Không thể cập nhật trạng thái booking sang completed:', err)
+        console.warn('Không thể cập nhật trạng thái booking sang paid:', err)
       }
     }
     ensureStatus()
   }, [bookingId, booking, ensuredStatus])
 
+  // QUAN TRỌNG: Cập nhật TotalSpent và Level cho user sau khi thanh toán thành công
+  useEffect(() => {
+    const updateUserTotalSpent = async () => {
+      if (!booking || !paymentChecked || totalSpentUpdated) return
+      
+      // Kiểm tra xem đã cập nhật TotalSpent cho booking này chưa (tránh cộng dồn khi refresh)
+      const updatedBookingsKey = 'updatedTotalSpentBookings'
+      const updatedBookings = JSON.parse(sessionStorage.getItem(updatedBookingsKey) || '[]')
+      const currentBookingId = booking.Id || booking.id
+      
+      if (updatedBookings.includes(currentBookingId)) {
+        console.log(`[PaymentSuccessPage] TotalSpent đã được cập nhật cho booking ${currentBookingId}, bỏ qua`)
+        setTotalSpentUpdated(true)
+        return
+      }
+      
+      // Lấy userId từ localStorage/sessionStorage
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+      if (!userInfoStr) return
+      
+      try {
+        const userInfo = JSON.parse(userInfoStr)
+        const userId = userInfo.Id || userInfo.id
+        if (!userId) return
+        
+        // Lấy số tiền thanh toán
+        const amountSpent = booking.TotalAmount || booking.totalAmount || 0
+        if (amountSpent <= 0) return
+        
+        console.log(`[PaymentSuccessPage] Updating TotalSpent for user ${userId} with amount ${amountSpent}`)
+        
+        // Gọi API update-spent để cập nhật TotalSpent và Level
+        await axiosInstance.put(
+          `${API_ENDPOINTS.USER}/update-spent/${userId}?amountSpent=${amountSpent}`
+        )
+        
+        console.log(`[PaymentSuccessPage] ✅ TotalSpent updated successfully`)
+        
+        // Đánh dấu đã cập nhật cho booking này
+        updatedBookings.push(currentBookingId)
+        sessionStorage.setItem(updatedBookingsKey, JSON.stringify(updatedBookings))
+        setTotalSpentUpdated(true)
+        
+        // Dispatch event để các component khác (Header, ProfilePage) biết cập nhật
+        window.dispatchEvent(new Event('userStorageChange'))
+      } catch (err) {
+        console.warn('[PaymentSuccessPage] Không thể cập nhật TotalSpent:', err)
+        setTotalSpentUpdated(true) // Đánh dấu đã thử để không retry liên tục
+      }
+    }
+    
+    updateUserTotalSpent()
+  }, [booking, paymentChecked, totalSpentUpdated])
+
   if (loading) {
     return (
       <div className="payment-result-page">
-        <Header />
+        <ConditionalHeader />
         <main className="payment-result-main">
           <LoadingSpinner message="Đang tải thông tin..." />
         </main>
@@ -285,7 +349,7 @@ const PaymentSuccessPage = () => {
   if (error || !booking) {
     return (
       <div className="payment-result-page">
-        <Header />
+        <ConditionalHeader />
         <main className="payment-result-main">
           <div className="payment-result-container">
             <div className="payment-error-container" role="alert">
@@ -315,7 +379,7 @@ const PaymentSuccessPage = () => {
 
   return (
     <div className="payment-result-page payment-success-page">
-      <Header />
+      <ConditionalHeader />
       <main className="payment-result-main">
         <div className="payment-result-container">
           {/* Success Icon */}

@@ -2343,3 +2343,48 @@
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
+
+/* Modal xác nhận xóa - phiên bản rộng hơn cho input lý do */
+.forum-forum-confirm-modal-wide {
+  max-width: 450px;
+  width: 90%;
+}
+
+/* Container cho input lý do xóa */
+.forum-forum-delete-reason-container {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.forum-forum-delete-reason-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.forum-forum-delete-reason-input:focus {
+  outline: none;
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.forum-forum-delete-reason-input::placeholder {
+  color: #94a3b8;
+}
+
+.forum-forum-delete-reason-input-error {
+  border-color: #ef4444;
+}
+
+.forum-forum-delete-reason-error {
+  display: block;
+  color: #ef4444;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}

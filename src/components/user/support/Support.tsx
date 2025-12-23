@@ -19,10 +19,12 @@ const checkIsAdminUser = (): boolean => {
   }
 }
 
-// Helper function để check đăng nhập
+// Helper function để check đăng nhập - kiểm tra cả token và userInfo
 const checkIsLoggedIn = (): boolean => {
   const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-  return !!token
+  const userInfo = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+  // Chỉ cần có 1 trong 2 là đủ để coi như đã đăng nhập
+  return !!(token || userInfo)
 }
 
 const Support: React.FC = () => {
@@ -50,9 +52,19 @@ const Support: React.FC = () => {
     // Check ngay khi mount
     checkAuthStatus()
 
-    // Check mỗi 2 giây để detect login/logout
-    const interval = setInterval(checkAuthStatus, 2000)
-    return () => clearInterval(interval)
+    // Check mỗi 1 giây để detect login/logout nhanh hơn
+    const interval = setInterval(checkAuthStatus, 1000)
+    
+    // Listen for storage changes (khi login/logout ở tab khác)
+    const handleStorageChange = () => {
+      checkAuthStatus()
+    }
+    window.addEventListener('storage', handleStorageChange)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('storage', handleStorageChange)
+    }
   }, [])
 
   const fetchUnreadCount = useCallback(async () => {

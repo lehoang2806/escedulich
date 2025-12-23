@@ -20,6 +20,7 @@ export type UpdateProfilePayload = {
   Gender: string
   Address: string
   DOB: string
+  TotalSpent?: string
 }
 
 const authorizedRequest = async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -188,35 +189,35 @@ export const updateProfile = async (payload: UpdateProfilePayload) => {
       body: JSON.stringify(payload)
     })
 
-    // Backend trả về Account entity trong result.user, nhưng có thể không có Role navigation property
-    // Luôn reload lại từ GetUserById để đảm bảo có đầy đủ thông tin mới nhất sau khi update
+    console.log('[UserApi] updateProfile response:', result)
+    console.log('[UserApi] Payload sent:', payload)
+
+    // Backend trả về Account entity trong result.user
+    // Ưu tiên dùng dữ liệu từ response trước, sau đó mới merge với payload đã gửi
     let normalizedUser: UserProfile
-    try {
-      // Reload lại từ API để đảm bảo có dữ liệu mới nhất
-      const fullProfile = await fetchProfile()
-      normalizedUser = fullProfile
+    
+    if (result?.user) {
+      normalizedUser = normalizeProfile(result.user)
+      console.log('[UserApi] Normalized user from response:', normalizedUser)
       
-      // Merge với dữ liệu từ response nếu có (fallback)
-      if (result?.user) {
-        const responseUser = normalizeProfile(result.user)
-        normalizedUser = {
-          ...normalizedUser,
-          // Ưu tiên dữ liệu từ fullProfile (đã reload), nhưng merge các field có thể thiếu
-          name: fullProfile.name || responseUser.name,
-          email: fullProfile.email || responseUser.email,
-          avatar: fullProfile.avatar || responseUser.avatar,
-          phone: fullProfile.phone || responseUser.phone,
-          gender: fullProfile.gender || responseUser.gender,
-          address: fullProfile.address || responseUser.address,
-          dob: fullProfile.dob || responseUser.dob,
-          roleId: fullProfile.roleId || responseUser.roleId,
-          roleName: fullProfile.roleName || responseUser.roleName
-        }
+      // Nếu response không có avatar nhưng payload có, dùng avatar từ payload
+      // (trường hợp backend chưa kịp trả về avatar mới)
+      if (!normalizedUser.avatar && payload.Avatar) {
+        normalizedUser.avatar = payload.Avatar
+        console.log('[UserApi] Using avatar from payload:', payload.Avatar)
       }
-    } catch (reloadError) {
-      console.warn('[UserApi] Không thể reload profile sau update, dùng dữ liệu từ response:', reloadError)
-      // Fallback: dùng dữ liệu từ response
-      normalizedUser = normalizeProfile(result?.user ?? result)
+    } else {
+      // Fallback: tạo từ payload
+      const current = loadProfileFromLocalStorage()
+      normalizedUser = {
+        ...current,
+        name: payload.Name || current.name,
+        phone: payload.Phone || current.phone,
+        avatar: payload.Avatar || current.avatar,
+        gender: payload.Gender || current.gender,
+        address: payload.Address || current.address,
+        dob: payload.DOB || current.dob
+      }
     }
 
     // Đồng bộ với localStorage để ViewProfile & EditProfile dùng lại sau này

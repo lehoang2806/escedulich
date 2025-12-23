@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, type ChangeEvent, type MouseEvent } from 'react'
+import React, { useState, useEffect, useMemo, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import ConditionalHeader from '~/components/user/ConditionalHeader'
 import Footer from '~/components/user/Footer'
@@ -12,7 +12,6 @@ import {
   StarIcon,
   MapPinIcon,
   SearchIcon,
-  HeartIcon,
   GridIcon,
   ListIcon,
   FilterIcon,
@@ -32,8 +31,6 @@ import './ServicesPage.css'
 interface TourCardProps {
   tour: ServiceItem
   index: number
-  isFavorite: boolean
-  onToggleFavorite: () => void
   isVisible: boolean
   fallbackImageUrl: string
 }
@@ -48,7 +45,6 @@ const ServicesPage = () => {
   const [selectedPriceRange, setSelectedPriceRange] = useState<PriceRange>('all')
   const [sortBy, setSortBy] = useState<SortBy>('popular')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [favorites, setFavorites] = useState<Set<number>>(new Set())
   const [ratings, setRatings] = useState<Record<number, number>>({}) // Map serviceId -> rating
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [showServices] = useState(false) // Luôn hiển thị ServiceCombo, không hiển thị Service đơn lẻ
@@ -60,17 +56,6 @@ const ServicesPage = () => {
     setIsVisible(true)
     window.scrollTo(0, 0)
     document.documentElement.style.scrollBehavior = 'smooth'
-
-    // Load favorites from localStorage
-    const savedFavorites = localStorage.getItem('esce_favorites')
-    if (savedFavorites) {
-      try {
-        const favoriteIds = JSON.parse(savedFavorites) as number[]
-        setFavorites(new Set(favoriteIds))
-      } catch (error) {
-        console.error('Error loading favorites:', error)
-      }
-    }
 
     return () => {
       document.documentElement.style.scrollBehavior = 'auto'
@@ -281,25 +266,6 @@ useEffect(() => {
 
     return filtered
   }, [allServices, searchName, selectedPriceRange, sortBy])
-
-  const toggleFavorite = (id: number | null) => {
-    if (id === null) return
-    setFavorites((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(id)) {
-        newSet.delete(id)
-      } else {
-        newSet.add(id)
-      }
-      // Persist favorites to localStorage
-      try {
-        localStorage.setItem('esce_favorites', JSON.stringify([...newSet]))
-      } catch (error) {
-        console.error('Error saving favorites:', error)
-      }
-      return newSet
-    })
-  }
 
   return (
     <div className="svc-services-page">
@@ -549,8 +515,6 @@ useEffect(() => {
                       key={tour.id}
                       tour={tour}
                       index={index}
-                      isFavorite={tour.id !== null && favorites.has(tour.id)}
-                      onToggleFavorite={() => toggleFavorite(tour.id)}
                       isVisible={isVisible}
                       fallbackImageUrl={fallbackImageUrl}
                     />
@@ -567,16 +531,10 @@ useEffect(() => {
 }
 
 // Tour Card Component
-const TourCard: React.FC<TourCardProps> = ({ tour, index, isFavorite, onToggleFavorite, isVisible, fallbackImageUrl }) => {
+const TourCard: React.FC<TourCardProps> = ({ tour, index, isVisible, fallbackImageUrl }) => {
   const discountPercent = tour.originalPrice
     ? Math.round(((tour.originalPrice - tour.price) / tour.originalPrice) * 100)
     : null
-
-  const handleFavoriteClick = (e: MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onToggleFavorite()
-  }
 
   return (
     <article
@@ -592,15 +550,6 @@ const TourCard: React.FC<TourCardProps> = ({ tour, index, isFavorite, onToggleFa
               className="svc-tour-image"
               fallbackSrc={fallbackImageUrl}
             />
-
-            {/* Favorite Button */}
-            <button
-              className={`svc-favorite-btn ${isFavorite ? 'svc-active' : ''}`}
-              onClick={handleFavoriteClick}
-              aria-label={isFavorite ? 'Bỏ yêu thích' : 'Thêm vào yêu thích'}
-            >
-              <HeartIcon filled={isFavorite} />
-            </button>
 
             {/* Discount Badge */}
             {discountPercent && discountPercent > 0 && (

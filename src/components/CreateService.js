@@ -1,8 +1,8 @@
 import './CreateService.css';
 import React, { useState, useEffect, useCallback } from 'react';
-import { createService } from '../api/ServiceApi';
+import { createService } from '../API/ServiceApi';
 import Header from './Header';
-import { getCurrentUser } from '../api/SocialMediaApi';
+import { getCurrentUser } from '../API/SocialMediaApi';
 
 const CreateService = () => {
    // State management

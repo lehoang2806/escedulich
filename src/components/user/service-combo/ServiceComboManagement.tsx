@@ -840,11 +840,41 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
           const coupons = couponsResponse.data || [];
           const enriched = await enrichCouponsWithDetails(coupons);
           setEditServiceComboAllCoupons(enriched);
+          
+          // Auto-select coupons that are already assigned to this service combo
+          const selectedCouponsMap = {};
+          enriched.forEach((coupon: any) => {
+            const couponServiceComboId = coupon.ServiceComboId || coupon.serviceComboId;
+            if (couponServiceComboId === serviceComboId) {
+              const couponId = String(coupon.Id || coupon.id);
+              selectedCouponsMap[couponId] = { selected: true };
+            }
+          });
+          setEditServiceComboSelectedCoupons(selectedCouponsMap);
         } catch {
           setEditServiceComboAllCoupons([]);
         }
       } else {
         setEditServiceComboAllCoupons([]);
+      }
+      
+      // Load promotions from Description field (format: [COMBO_PROMOTIONS:1,2,3])
+      try {
+        const description = serviceCombo.Description || serviceCombo.description || '';
+        const promotionMatch = description.match(/\[COMBO_PROMOTIONS:([^\]]*)\]/);
+        if (promotionMatch && promotionMatch[1]) {
+          const promotionIds = promotionMatch[1].split(',').map((id: string) => parseInt(id.trim())).filter((id: number) => !isNaN(id));
+          const selectedPromotionsMap = {};
+          promotionIds.forEach((promoId: number) => {
+            selectedPromotionsMap[String(promoId)] = { selected: true };
+          });
+          setEditServiceComboSelectedPromotions(selectedPromotionsMap);
+          console.log('[ServiceComboManagement] Loaded promotions from Description for combo', serviceComboId, ':', promotionIds);
+        } else {
+          console.log('[ServiceComboManagement] No promotions found in Description for combo', serviceComboId);
+        }
+      } catch (err) {
+        console.warn('[ServiceComboManagement] Could not load promotions from Description:', err);
       }
       
       // Load existing service combo details from API
@@ -1148,9 +1178,22 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
         AvailableSlots: parseInt(editServiceComboFormData.availableSlots) || 1,
         Host: hostData, // Include Host to satisfy backend validation
       };
-      const desc = editServiceComboFormData.description?.trim();
-      if (desc) requestBody.Description = desc;
-      else requestBody.Description = existingCombo.Description || null;
+      
+      // Get selected promotion IDs to save in Description
+      const selectedPromotionIds = Object.keys(editServiceComboSelectedPromotions)
+        .filter(id => editServiceComboSelectedPromotions[id]?.selected)
+        .map(id => parseInt(id));
+      
+      // Build description with promotion tag
+      let desc = editServiceComboFormData.description?.trim() || '';
+      // Remove old promotion tag if exists
+      desc = desc.replace(/\[COMBO_PROMOTIONS:[^\]]*\]/g, '').trim();
+      // Add new promotion tag if there are selected promotions
+      if (selectedPromotionIds.length > 0) {
+        desc = desc + (desc ? '\n' : '') + `[COMBO_PROMOTIONS:${selectedPromotionIds.join(',')}]`;
+      }
+      requestBody.Description = desc || existingCombo.Description || null;
+      
       const cancel = editServiceComboFormData.cancellationPolicy?.trim();
       if (cancel) requestBody.CancellationPolicy = cancel;
       else requestBody.CancellationPolicy = existingCombo.CancellationPolicy || null;
@@ -1183,6 +1226,41 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
           ServiceId: parseInt(serviceId),
           Quantity: quantity
         });
+      }
+      
+      // Update coupons - set ServiceComboId for selected coupons, remove for unselected
+      const selectedCouponIds = Object.keys(editServiceComboSelectedCoupons).filter(
+        id => editServiceComboSelectedCoupons[id]?.selected
+      );
+      
+      // For each coupon in allCoupons, update ServiceComboId
+      for (const coupon of editServiceComboAllCoupons) {
+        const couponId = String(coupon.Id || coupon.id);
+        const isSelected = selectedCouponIds.includes(couponId);
+        const currentServiceComboId = coupon.ServiceComboId || coupon.serviceComboId;
+        
+        // Only update if selection changed
+        if (isSelected && currentServiceComboId !== editingServiceComboId) {
+          // Assign coupon to this combo
+          try {
+            await axiosInstance.put(`${API_ENDPOINTS.COUPON}/${couponId}`, {
+              ...coupon,
+              ServiceComboId: editingServiceComboId
+            });
+          } catch (err) {
+            console.warn(`Could not update coupon ${couponId}:`, err);
+          }
+        } else if (!isSelected && currentServiceComboId === editingServiceComboId) {
+          // Remove coupon from this combo (set ServiceComboId to null)
+          try {
+            await axiosInstance.put(`${API_ENDPOINTS.COUPON}/${couponId}`, {
+              ...coupon,
+              ServiceComboId: null
+            });
+          } catch (err) {
+            console.warn(`Could not update coupon ${couponId}:`, err);
+          }
+        }
       }
       
       const updatedCombos = serviceCombos.map(sc => {

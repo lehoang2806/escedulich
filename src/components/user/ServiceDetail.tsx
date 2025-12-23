@@ -230,6 +230,7 @@ const ServiceDetail = () => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [userBookings, setUserBookings] = useState([]);
   const [canReview, setCanReview] = useState(false);
+  const [hasBookingNotCompleted, setHasBookingNotCompleted] = useState(false); // User có booking nhưng chưa completed
   const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null); // BookingId để dùng cho can-review check
   const [sortBy, setSortBy] = useState('newest'); // 'newest', 'oldest', 'highest', 'lowest'
   const [filterRating, setFilterRating] = useState(0); // 0 = all, 1-5 = filter by rating
@@ -665,6 +666,7 @@ const ServiceDetail = () => {
       if (!userId || !id) {
         setCanReview(false);
         setSelectedBookingId(null);
+        setHasBookingNotCompleted(false);
         return;
       }
 
@@ -692,11 +694,23 @@ const ServiceDetail = () => {
           }
         }
         
-        // Bước 2: Filter bookings có ServiceComboId = id và status = completed (chỉ cho phép review sau khi hoàn thành chuyến)
-        const relevantBookings = bookings.filter(booking => {
+        // Lọc bookings của service combo này
+        const serviceComboBookings = bookings.filter((booking: any) => {
           const comboId = booking.ServiceComboId || booking.serviceComboId;
+          return comboId === parseInt(id);
+        });
+        
+        // Kiểm tra xem có booking nào chưa completed không (pending, confirmed, paid, etc.)
+        const hasNotCompletedBooking = serviceComboBookings.some((booking: any) => {
           const status = (booking.Status || booking.status || '').toLowerCase();
-          return comboId === parseInt(id) && status === 'completed';
+          return status !== 'completed' && status !== 'cancelled' && status !== 'canceled';
+        });
+        setHasBookingNotCompleted(hasNotCompletedBooking);
+        
+        // Bước 2: Filter bookings có ServiceComboId = id và status = completed (chỉ cho phép review sau khi hoàn thành chuyến)
+        const relevantBookings = serviceComboBookings.filter((booking: any) => {
+          const status = (booking.Status || booking.status || '').toLowerCase();
+          return status === 'completed';
         });
 
         if (relevantBookings.length === 0) {
@@ -758,6 +772,7 @@ const ServiceDetail = () => {
         }
         setCanReview(false);
         setSelectedBookingId(null);
+        setHasBookingNotCompleted(false);
       }
     }, [id]);
 
@@ -1641,6 +1656,21 @@ const ServiceDetail = () => {
                         <StarIcon className="sd-button-icon" />
                         Viết đánh giá
                       </Button>
+                    )}
+                    {!canReview && hasBookingNotCompleted && !showReviewForm && (
+                      <div className="sd-review-notice" style={{ 
+                        padding: '8px 16px', 
+                        backgroundColor: '#fff3cd', 
+                        color: '#856404', 
+                        borderRadius: '8px',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <span>⏳</span>
+                        <span>Vui lòng trải nghiệm dịch vụ trước khi gửi đánh giá</span>
+                      </div>
                     )}
                   </div>
 

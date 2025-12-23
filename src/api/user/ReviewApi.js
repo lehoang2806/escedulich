@@ -21,7 +21,7 @@ export const getAllReviews = async () => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review`, {
+  const response = await fetch(`${backend_url}/api/review`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -65,7 +65,7 @@ export const getReviewById = async (reviewId) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/${reviewId}`, {
+  const response = await fetch(`${backend_url}/api/review/${reviewId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -99,7 +99,7 @@ export const getReviewsByBookingId = async (bookingId) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/booking/${bookingId}`, {
+  const response = await fetch(`${backend_url}/api/review/booking/${bookingId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -133,7 +133,7 @@ export const updateReview = async (reviewId, reviewData) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/${reviewId}`, {
+  const response = await fetch(`${backend_url}/api/review/${reviewId}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -168,7 +168,7 @@ export const updateReviewStatus = async (reviewId, status) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/${reviewId}/status`, {
+  const response = await fetch(`${backend_url}/api/review/${reviewId}/status`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -203,7 +203,7 @@ export const createReply = async (parentReviewId, authorId, content) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/${parentReviewId}/reply`, {
+  const response = await fetch(`${backend_url}/api/review/${parentReviewId}/reply`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -238,7 +238,7 @@ export const updateReply = async (replyId, content) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/reply/${replyId}`, {
+  const response = await fetch(`${backend_url}/api/review/reply/${replyId}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -273,7 +273,7 @@ export const deleteReply = async (replyId) => {
   const token = getToken();
   if (!token) throw new Error('Authentication required');
   
-  const response = await fetch(`${backend_url}/api/Review/reply/${replyId}`, {
+  const response = await fetch(`${backend_url}/api/review/reply/${replyId}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,

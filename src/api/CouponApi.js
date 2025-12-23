@@ -10,7 +10,7 @@ export const getCouponsByComboId = async (comboId) => {
     throw new Error('Authentication required');
   }
 
-  const response = await fetch(`${backend_url}/api/Coupon/combo/${comboId}`, {
+  const response = await fetch(`${backend_url}/api/coupon/combo/${comboId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -46,7 +46,7 @@ export const createCoupon = async (couponData) => {
     throw new Error('Authentication required');
   }
 
-  const response = await fetch(`${backend_url}/api/Coupon`, {
+  const response = await fetch(`${backend_url}/api/coupon`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -93,7 +93,7 @@ export const deleteCoupon = async (couponId) => {
     throw new Error('Authentication required');
   }
 
-  const response = await fetch(`${backend_url}/api/Coupon/${couponId}`, {
+  const response = await fetch(`${backend_url}/api/coupon/${couponId}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -126,7 +126,7 @@ export const deleteCoupon = async (couponId) => {
 export const getCouponById = async (id) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
-  const res = await fetch(`${backend_url}/api/Coupon/${id}`, {
+  const res = await fetch(`${backend_url}/api/coupon/${id}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -145,7 +145,7 @@ export const getCouponById = async (id) => {
 export const updateCoupon = async (id, updateData) => {
   const token = localStorage.getItem('token');
   if (!token) throw new Error('Authentication required');
-  const res = await fetch(`${backend_url}/api/Coupon/${id}`, {
+  const res = await fetch(`${backend_url}/api/coupon/${id}`, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
