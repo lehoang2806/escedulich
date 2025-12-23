@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, type ChangeEvent } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import axiosInstance from '~/utils/axiosInstance'
@@ -12,6 +14,7 @@ import { API_ENDPOINTS } from '~/config/api'
 import * as couponService from '~/services/couponService'
 import type { MembershipTier } from '~/types/membership'
 import './PaymentPage.css'
+
 
 interface BookingData {
   Id?: number
@@ -121,6 +124,7 @@ interface BookingData {
   [key: string]: unknown
 }
 
+
 interface CouponData {
   Code?: string
   code?: string
@@ -129,6 +133,7 @@ interface CouponData {
   [key: string]: unknown
 }
 
+
 interface PaymentStatus {
   Status?: string
   status?: string
@@ -136,6 +141,7 @@ interface PaymentStatus {
   amount?: number
   [key: string]: unknown
 }
+
 
 const PaymentPage = () => {
   const { bookingId } = useParams<{ bookingId: string }>()
@@ -147,6 +153,7 @@ const PaymentPage = () => {
   const [processing, setProcessing] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null)
 
+
   // Coupon state (giữ lại để tương thích với backend hiện tại)
   const [couponCode, setCouponCode] = useState('')
   const [appliedCoupon, setAppliedCoupon] = useState<CouponData | null>(null)
@@ -156,10 +163,11 @@ const PaymentPage = () => {
   const [couponError, setCouponError] = useState('')
   const [additionalServices, setAdditionalServices] = useState<Array<{ Name?: string; Description?: string; Price?: number; id?: number; quantity?: number }>>([])
   const [additionalServicesTotal, setAdditionalServicesTotal] = useState(0)
-  
+ 
   // Complementary Services state
   const [userTier, setUserTier] = useState<MembershipTier>('none')
   const [selectedComplementaryServices, setSelectedComplementaryServices] = useState<number[]>([])
+
 
   // Lấy userTier từ user info
   useEffect(() => {
@@ -184,17 +192,22 @@ const PaymentPage = () => {
     }
   }, []);
 
+
   const estimateBaseAmount = (bookingData: BookingData | null): number => {
     if (!bookingData) return 0
+
 
     const serviceCombo = bookingData.ServiceCombo || bookingData.serviceCombo
     const rawPrice = serviceCombo?.Price ?? serviceCombo?.price
     const unitPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice)) || 0
 
+
     const rawQuantity = bookingData.Quantity ?? bookingData.quantity ?? 0
     const quantity = typeof rawQuantity === 'number' ? rawQuantity : parseInt(String(rawQuantity), 10) || 0
 
+
     let baseAmount = unitPrice * quantity
+
 
     const roleName =
       (bookingData?.User?.Role?.Name ||
@@ -203,16 +216,20 @@ const PaymentPage = () => {
         bookingData?.user?.role?.name ||
         '') as string
 
+
     if (typeof roleName === 'string' && roleName.toLowerCase() === 'agency') {
       baseAmount *= 0.97
     }
+
 
     if (!baseAmount) {
       return (bookingData.TotalAmount || bookingData.totalAmount || 0) as number
     }
 
+
     return baseAmount
   }
+
 
   // Lấy returnUrl và returnTab từ location.state
   // Mặc định quay về trang booking của service combo đang xem
@@ -220,6 +237,7 @@ const PaymentPage = () => {
   const defaultReturnUrl = serviceComboId ? `/booking/${serviceComboId}` : '/services'
   const returnUrl = (location.state as { returnUrl?: string })?.returnUrl || defaultReturnUrl
   const returnTab = (location.state as { returnTab?: string })?.returnTab || null
+
 
   // Fetch booking data
   useEffect(() => {
@@ -230,12 +248,15 @@ const PaymentPage = () => {
         return
       }
 
+
       try {
         setLoading(true)
         setError(null)
 
+
         const response = await axiosInstance.get<BookingData>(`${API_ENDPOINTS.BOOKING}/${bookingId}`)
         console.log(' PaymentPage: Nhận được dữ liệu booking:', response.data)
+
 
         let bookingData = response.data
         if (!bookingData) {
@@ -243,10 +264,11 @@ const PaymentPage = () => {
           return
         }
 
+
         // Fallback: Nếu không có ServiceCombo/Service trong response, fetch thêm
         const serviceComboId = bookingData.ServiceComboId || bookingData.serviceComboId
         const serviceId = bookingData.ServiceId || bookingData.serviceId
-        
+       
         if (!bookingData.ServiceCombo && !bookingData.serviceCombo && !bookingData.Service && !bookingData.service) {
           if (serviceComboId) {
             try {
@@ -273,19 +295,22 @@ const PaymentPage = () => {
           }
         }
 
+
         setBooking(bookingData)
+
 
         // Nếu vẫn không có ServiceCombo/Service sau khi fetch, thử fetch lại trong useEffect riêng
         // (để đảm bảo luôn có dữ liệu)
+
 
         // Parse Notes để lấy ghi chú và dịch vụ thêm
         // Format từ BookingPage: [ADDITIONAL_SERVICES:id:qty,id:qty,...]
         const notes = (bookingData.Notes || bookingData.notes || '') as string
         console.log(' PaymentPage: Notes raw:', notes)
-        
+       
         const additionalServicesMatch = notes.match(/\[ADDITIONAL_SERVICES:([^\]]+)\]/)
         console.log(' PaymentPage: additionalServicesMatch:', additionalServicesMatch)
-        
+       
         if (additionalServicesMatch) {
           // Parse format: id:qty,id:qty,...
           const serviceEntries = additionalServicesMatch[1].split(',').map(entry => {
@@ -295,24 +320,24 @@ const PaymentPage = () => {
               quantity: parseInt(qtyStr?.trim() || '1')
             }
           }).filter(entry => !isNaN(entry.id) && entry.quantity > 0)
-          
+         
           console.log(' PaymentPage: serviceEntries:', serviceEntries)
-          
+         
           if (serviceEntries.length > 0) {
             try {
               // Fetch thông tin dịch vụ thêm
               const serviceComboId = bookingData.ServiceComboId || bookingData.serviceComboId
               console.log(' PaymentPage: Fetching services for combo:', serviceComboId)
-              
+             
               if (serviceComboId) {
                 const comboDetailResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO_DETAIL}/combo/${serviceComboId}`)
                 const comboDetails = comboDetailResponse.data || []
                 console.log(' PaymentPage: comboDetails:', comboDetails)
-                
+               
                 // Lọc các dịch vụ theo ID và lấy cả Price, kèm quantity từ notes
                 const serviceIds = serviceEntries.map(e => e.id)
                 console.log(' PaymentPage: Looking for serviceIds:', serviceIds)
-                
+               
                 const services = comboDetails
                   .map((detail: any) => detail.Service || detail.service)
                   .filter((service: any) => {
@@ -333,10 +358,10 @@ const PaymentPage = () => {
                       quantity: entry?.quantity || 1
                     }
                   })
-                
+               
                 console.log(' PaymentPage: Filtered services:', services)
                 setAdditionalServices(services)
-                
+               
                 // Tính tổng tiền dịch vụ thêm (dùng quantity riêng của mỗi service)
                 const servicesTotal = services.reduce((sum: number, s: any) => sum + (s.Price || 0) * (s.quantity || 1), 0)
                 console.log(' PaymentPage: servicesTotal:', servicesTotal)
@@ -355,14 +380,14 @@ const PaymentPage = () => {
           setAdditionalServices([])
           setAdditionalServicesTotal(0)
         }
-        
+       
         // Tính giá gốc từ ServiceCombo.Price
         const serviceCombo = bookingData.ServiceCombo || bookingData.serviceCombo
         let rawPrice = serviceCombo?.Price ?? serviceCombo?.price
         let unitPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice)) || 0
         const rawQuantity = bookingData.Quantity ?? bookingData.quantity ?? 0
         const quantity = typeof rawQuantity === 'number' ? rawQuantity : parseInt(String(rawQuantity), 10) || 0
-        
+       
         // Nếu không có giá từ ServiceCombo, fetch lại
         if (unitPrice === 0 && (bookingData.ServiceComboId || bookingData.serviceComboId)) {
           try {
@@ -376,25 +401,25 @@ const PaymentPage = () => {
             console.warn(' PaymentPage: Không thể fetch ServiceCombo price:', err)
           }
         }
-        
+       
         const originalPriceBeforeDiscount = unitPrice * quantity
         const bookingTotal = (bookingData.TotalAmount || bookingData.totalAmount || 0) as number
-        
+       
         // Parse coupon code từ Notes và tự tính discount ở frontend
         // Format từ BookingPage: [COUPON_CODE:xxx]
         const couponCodeMatch = notes.match(/\[COUPON_CODE:([^\]]+)\]/)
         let couponDiscountCalculated = 0
-        
+       
         // Luôn set originalTotal trước, dù có coupon hay không
         // Nếu có giá gốc từ ServiceCombo, dùng nó; nếu không, dùng bookingTotal
         const baseOriginalTotal = originalPriceBeforeDiscount > 0 ? originalPriceBeforeDiscount : bookingTotal
         setOriginalTotal(baseOriginalTotal)
-        
+       
         if (couponCodeMatch && couponCodeMatch[1]) {
           const savedCouponCode = couponCodeMatch[1].trim()
           setCouponCode(savedCouponCode)
           console.log(' PaymentPage: Tìm thấy coupon code trong Notes:', savedCouponCode)
-          
+         
           // Fetch coupon info để tính discount
           try {
             const couponResponse = await axiosInstance.post(`${API_ENDPOINTS.COUPON}/calculate-discount`, {
@@ -402,7 +427,7 @@ const PaymentPage = () => {
               OriginalAmount: baseOriginalTotal
             })
             couponDiscountCalculated = couponResponse.data?.Discount || couponResponse.data?.discount || 0
-            
+           
             if (couponDiscountCalculated > 0) {
               setDiscountAmount(couponDiscountCalculated)
               setAppliedCoupon({ Code: savedCouponCode, code: savedCouponCode })
@@ -422,7 +447,7 @@ const PaymentPage = () => {
             }
           }
         }
-        
+       
         // Debug log
         console.log(' PaymentPage: Tính toán giá:', {
           bookingTotal,
@@ -434,23 +459,25 @@ const PaymentPage = () => {
           notes: notes.substring(0, 100)
         })
 
+
         const bookingCoupons = bookingData.BookingCoupons || bookingData.bookingCoupons || []
-        
+       
         // Kiểm tra xem đã có coupon từ Notes chưa (đã parse ở trên)
         const hasCouponFromNotes = notes.match(/\[COUPON_CODE:([^\]]+)\]/) !== null
-        
+       
         console.log(' PaymentPage: Coupon info:', {
           bookingCouponsLength: bookingCoupons.length,
           hasCouponFromNotes,
           couponCodeMatch: notes.match(/\[COUPON_CODE:([^\]]+)\]/)
         })
-        
+       
         if (bookingCoupons.length > 0) {
           const couponWrapper = bookingCoupons[0]
           const coupon = couponWrapper?.Coupon || couponWrapper?.coupon
           if (coupon) {
             setAppliedCoupon(coupon)
             setCouponCode((coupon.Code || coupon.code || '') as string)
+
 
             // Khi có coupon: originalTotal = giá gốc, discountAmount = giá gốc - giá đã giảm
             if (originalPriceBeforeDiscount > bookingTotal) {
@@ -476,6 +503,7 @@ const PaymentPage = () => {
               bookingData?.user?.role?.name ||
               '') as string
 
+
           if (typeof roleName === 'string' && roleName.toLowerCase() === 'agency') {
             // Agency được giảm 3%, nên giá gốc = bookingTotal / 0.97
             const agencyDiscountRate = 0.97
@@ -489,6 +517,7 @@ const PaymentPage = () => {
             setDiscountAmount(0)
           }
         }
+
 
         // Kiểm tra trạng thái thanh toán hiện tại (nếu có)
         // Không hiển thị lỗi nếu chưa có payment - đây là trường hợp bình thường
@@ -536,19 +565,24 @@ const PaymentPage = () => {
       }
     }
 
+
     fetchBooking()
   }, [bookingId, navigate])
+
 
   // Fetch ServiceCombo nếu booking đã có nhưng thiếu ServiceCombo/Service
   useEffect(() => {
     const fetchServiceComboIfNeeded = async () => {
       if (!booking) return
 
+
       const hasServiceCombo = !!(booking.ServiceCombo || booking.serviceCombo || booking.Service || booking.service)
       if (hasServiceCombo) return
 
+
       const serviceComboId = booking.ServiceComboId || booking.serviceComboId
       const serviceId = booking.ServiceId || booking.serviceId
+
 
       if (serviceComboId) {
         try {
@@ -575,8 +609,10 @@ const PaymentPage = () => {
       }
     }
 
+
     fetchServiceComboIfNeeded()
   }, [booking])
+
 
   // Coupon handlers
   const handleApplyCoupon = async () => {
@@ -585,13 +621,16 @@ const PaymentPage = () => {
       return
     }
 
+
     if (!booking) {
       setCouponError('Chưa tải được thông tin booking')
       return
     }
 
+
     setValidatingCoupon(true)
     setCouponError('')
+
 
     try {
       const serviceComboId = (booking.ServiceComboId || booking.serviceComboId) as number | undefined
@@ -600,27 +639,33 @@ const PaymentPage = () => {
         return
       }
 
+
       // Validate coupon
       const validateResponse = await couponService.validateCoupon(couponCode.trim(), serviceComboId)
+
 
       if (!validateResponse.IsValid) {
         setCouponError('Mã giảm giá không hợp lệ')
         return
       }
 
+
       // Calculate discount với original total
       const currentTotal = (booking.TotalAmount || booking.totalAmount || 0) as number
       const discountResponse = await couponService.calculateDiscount(couponCode.trim(), currentTotal)
       const discount = discountResponse.Discount || 0
+
 
       if (discount <= 0) {
         setCouponError('Mã giảm giá không áp dụng được cho đơn hàng này')
         return
       }
 
+
       // Apply coupon
       const bookingIdValue = (booking.Id || booking.id) as number
       await couponService.applyCoupon(bookingIdValue, couponCode.trim())
+
 
       // Reload booking để lấy TotalAmount mới
       const updatedBookingResponse = await axiosInstance.get<BookingData>(
@@ -630,14 +675,17 @@ const PaymentPage = () => {
       const updatedTotal = (updatedBooking.TotalAmount || updatedBooking.totalAmount || 0) as number
       const previousTotal = currentTotal
 
+
       const bookingCoupons = updatedBooking.BookingCoupons || updatedBooking.bookingCoupons || []
       const latestCoupon =
         bookingCoupons.length > 0
           ? ((bookingCoupons[0].Coupon || bookingCoupons[0].coupon) as CouponData)
           : null
 
+
       setBooking(updatedBooking)
       setAppliedCoupon(latestCoupon)
+
 
       if (previousTotal > updatedTotal) {
         setOriginalTotal(previousTotal)
@@ -654,6 +702,7 @@ const PaymentPage = () => {
         message?: string
       }
 
+
       if (axiosError.response?.status === 404) {
         setCouponError('Mã giảm giá không tồn tại')
       } else if (axiosError.response?.status === 400) {
@@ -669,15 +718,18 @@ const PaymentPage = () => {
     }
   }
 
+
   const handleRemoveCoupon = async () => {
     if (!appliedCoupon || !booking) {
       return
     }
 
+
     try {
       const bookingIdValue = (booking.Id || booking.id) as number
       const couponCodeValue = (appliedCoupon.Code || appliedCoupon.code || '') as string
       await couponService.removeCoupon(bookingIdValue, couponCodeValue)
+
 
       // Reload booking để lấy TotalAmount gốc
       const updatedBookingResponse = await axiosInstance.get<BookingData>(
@@ -685,6 +737,7 @@ const PaymentPage = () => {
       )
       const updatedBooking = updatedBookingResponse.data
       setBooking(updatedBooking)
+
 
       setCouponCode('')
       setAppliedCoupon(null)
@@ -697,6 +750,7 @@ const PaymentPage = () => {
     }
   }
 
+
   const handlePayment = async () => {
     if (!booking) {
       console.error(' PaymentPage.handlePayment: Booking không tồn tại')
@@ -704,26 +758,30 @@ const PaymentPage = () => {
       return
     }
 
+
     setProcessing(true)
     setError(null)
+
 
     try {
       // Tạo payment intent
       const bookingIdValue = (booking.Id || booking.id) as number
       const totalAmount = (booking.TotalAmount || booking.totalAmount || 0) as number
 
+
       if (!bookingIdValue || totalAmount <= 0) {
         throw new Error('Thông tin đặt dịch vụ không hợp lệ')
       }
+
 
       // Tính số tiền thanh toán thực tế (đã trừ giảm giá + dịch vụ thêm)
       // Nếu có discount từ frontend, dùng: originalTotal - discountAmount + additionalServicesTotal
       // Nếu không, dùng: totalAmount + additionalServicesTotal
       const hasDiscountApplied = discountAmount > 0 && originalTotal > 0
-      const paymentAmount = hasDiscountApplied 
+      const paymentAmount = hasDiscountApplied
         ? (originalTotal - discountAmount + additionalServicesTotal)
         : (totalAmount + additionalServicesTotal)
-      
+     
       console.log(' PaymentPage.handlePayment: Tính số tiền thanh toán:', {
         totalAmount,
         originalTotal,
@@ -732,22 +790,25 @@ const PaymentPage = () => {
         hasDiscountApplied,
         paymentAmount
       })
-      
+     
       if (paymentAmount <= 0) {
         throw new Error('Số tiền thanh toán phải lớn hơn 0')
       }
 
+
       // PayOS chỉ cho phép description tối đa 25 ký tự
       const description = 'Goi dich vu ESCE'
-      
+     
       const paymentRequest = {
         BookingId: bookingIdValue,
         Amount: paymentAmount,
         Description: description,
       }
 
+
       console.log(' PaymentPage.handlePayment: Tạo payment intent:', paymentRequest)
       console.log(`   Endpoint: ${API_ENDPOINTS.PAYMENT}/create-intent`)
+
 
       const response = await axiosInstance.post<{
         CheckoutUrl?: string
@@ -758,7 +819,9 @@ const PaymentPage = () => {
         }
       }>(`${API_ENDPOINTS.PAYMENT}/create-intent`, paymentRequest)
 
+
       console.log(' PaymentPage.handlePayment: Payment intent tạo thành công:', response.data)
+
 
       // Thử nhiều cách để lấy checkoutUrl
       const checkoutUrl =
@@ -767,10 +830,12 @@ const PaymentPage = () => {
         response.data?.data?.checkoutUrl ||
         response.data?.data?.CheckoutUrl
 
+
       if (!checkoutUrl) {
         console.error(' PaymentPage.handlePayment: Không tìm thấy checkoutUrl trong response:', response.data)
         throw new Error('Không nhận được URL thanh toán từ server. Vui lòng thử lại sau.')
       }
+
 
       console.log(` PaymentPage.handlePayment: Redirecting to checkout URL: ${checkoutUrl}`)
       // Chuyển hướng đến PayOS checkout
@@ -789,6 +854,7 @@ const PaymentPage = () => {
         code?: string
         message?: string
       }
+
 
       // Xử lý các loại lỗi khác nhau
       if (axiosError.response?.status === 401 || axiosError.response?.status === 403) {
@@ -809,6 +875,7 @@ const PaymentPage = () => {
           errorData.innerException ||
           'Đã xảy ra lỗi từ server. Vui lòng thử lại sau.'
 
+
         // Nếu là lỗi DNS, hiển thị thông báo chi tiết hơn
         if (
           errorData.error &&
@@ -828,6 +895,7 @@ const PaymentPage = () => {
           // Sử dụng message từ backend nếu có
           errorMessage = errorData.message
         }
+
 
         setError(errorMessage)
         console.error('   Server error details:', JSON.stringify(errorData, null, 2))
@@ -860,6 +928,7 @@ const PaymentPage = () => {
     }
   }
 
+
   if (loading) {
     return (
       <div className="pay-payment-page">
@@ -870,6 +939,7 @@ const PaymentPage = () => {
       </div>
     )
   }
+
 
   if (error || !booking) {
     return (
@@ -891,6 +961,7 @@ const PaymentPage = () => {
     )
   }
 
+
   const bookingIdValue = (booking.Id || booking.id) as number
   const totalAmount = (booking.TotalAmount || booking.totalAmount || 0) as number
   const bookingStatus = (booking.Status || booking.status || 'pending') as string
@@ -902,6 +973,7 @@ const PaymentPage = () => {
     paymentStatus?.status === 'paid'
   const isPending = paymentStatus?.Status === 'pending' || paymentStatus?.status === 'pending' || !paymentStatus
 
+
   // Kiểm tra xem có thể thanh toán không
   // Không cho thanh toán nếu booking đã bị hủy, đã xác nhận, hoặc đã hoàn thành
   const canPay =
@@ -910,17 +982,20 @@ const PaymentPage = () => {
     bookingStatusLower !== 'confirmed' &&
     bookingStatusLower !== 'completed'
 
+
   // Tổng tiền hiển thị
   // Nếu có discount từ frontend (coupon trong Notes), tính: originalTotal - discountAmount + additionalServicesTotal
   // Nếu không, dùng totalAmount từ backend + additionalServicesTotal
   const hasDiscount = discountAmount > 0 && originalTotal > 0
-  const finalTotal = hasDiscount 
+  const finalTotal = hasDiscount
     ? (originalTotal - discountAmount + additionalServicesTotal)
     : (totalAmount + additionalServicesTotal)
+
 
   return (
     <div className="pay-payment-page">
       <Header />
+
 
       <main className="pay-payment-main">
         <div className="pay-payment-container">
@@ -945,12 +1020,14 @@ const PaymentPage = () => {
             <h1 className="pay-payment-page-title">Thanh toán</h1>
           </div>
 
+
           <div className="pay-payment-content">
             {/* Left Column - Payment Info */}
             <div className="payment-left">
               <Card className="pay-payment-info-card">
                 <CardContent>
                   <h2 className="pay-card-title">Thông tin đặt dịch vụ</h2>
+
 
                   <div className="pay-payment-info">
                     {/* 1. Dịch vụ (Tên) */}
@@ -959,7 +1036,7 @@ const PaymentPage = () => {
                       const service = booking.Service || booking.service
                       const item = serviceCombo || service
                       const itemName = item?.Name || item?.name || ''
-                      
+                     
                       // Debug log chi tiết
                       if (import.meta.env.DEV) {
                         console.log('🔍 [PaymentPage] Render - Service/Combo info:', {
@@ -973,11 +1050,11 @@ const PaymentPage = () => {
                           serviceId: booking.ServiceId || booking.serviceId
                         })
                       }
-                      
+                     
                       // Luôn hiển thị "Dịch vụ" row, nếu không có tên thì hiển thị placeholder
                       const serviceComboId = booking.ServiceComboId || booking.serviceComboId
                       const serviceId = booking.ServiceId || booking.serviceId
-                      
+                     
                       if (!itemName && (serviceComboId || serviceId)) {
                         // Đang fetch hoặc chưa có dữ liệu
                         return (
@@ -987,12 +1064,12 @@ const PaymentPage = () => {
                           </div>
                         )
                       }
-                      
+                     
                       if (!itemName) {
                         // Không có ServiceComboId/ServiceId, không hiển thị
                         return null
                       }
-                      
+                     
                       // Có tên dịch vụ, hiển thị
                       return (
                         <div className="pay-info-row">
@@ -1004,15 +1081,24 @@ const PaymentPage = () => {
                       )
                     })()}
 
+
                     {/* 2. Mô tả */}
                     {(() => {
                       const serviceCombo = booking.ServiceCombo || booking.serviceCombo
                       const service = booking.Service || booking.service
                       const item = serviceCombo || service
-                      const itemDescription = item?.Description || item?.description || ''
-                      
+                      let itemDescription = item?.Description || item?.description || ''
+                     
+                      // Ẩn các tag hệ thống trong mô tả
+                      itemDescription = itemDescription
+                        .replace(/\[COMBO_PROMOTIONS:[^\]]*\]/g, '')
+                        .replace(/\[ADDITIONAL_SERVICES:[^\]]*\]/g, '')
+                        .replace(/\[COUPON_CODE:[^\]]*\]/g, '')
+                        .replace(/\[COMPLEMENTARY_SERVICES_IDS:[^\]]*\]/g, '')
+                        .trim()
+                     
                       if (!itemDescription) return null
-                      
+                     
                       return (
                         <div className="pay-info-row">
                           <span className="pay-info-label">Mô tả</span>
@@ -1023,13 +1109,14 @@ const PaymentPage = () => {
                       )
                     })()}
 
+
                     {/* 3. Địa chỉ */}
                     {(() => {
                       const serviceCombo = booking.ServiceCombo || booking.serviceCombo
                       const itemAddress = serviceCombo?.Address || serviceCombo?.address || ''
-                      
+                     
                       if (!itemAddress) return null
-                      
+                     
                       return (
                         <div className="pay-info-row">
                           <span className="pay-info-label">Địa chỉ</span>
@@ -1037,6 +1124,7 @@ const PaymentPage = () => {
                         </div>
                       )
                     })()}
+
 
                     {/* 4. Trạng thái */}
                     <div className="pay-info-row">
@@ -1056,6 +1144,7 @@ const PaymentPage = () => {
                       </span>
                     </div>
 
+
                     {/* 5. Ngày đặt */}
                     {booking.BookingDate && (
                       <div className="pay-info-row">
@@ -1072,6 +1161,7 @@ const PaymentPage = () => {
                       </div>
                     )}
 
+
                     {/* 6. Số lượng */}
                     <div className="pay-info-row">
                       <span className="pay-info-label">Số lượng</span>
@@ -1079,6 +1169,7 @@ const PaymentPage = () => {
                         {(booking.Quantity || booking.quantity || 1) as number} người
                       </span>
                     </div>
+
 
                     {/* 7. Ghi chú */}
                     {booking.Notes && (() => {
@@ -1088,9 +1179,9 @@ const PaymentPage = () => {
                         .replace(/\n?\[ADDITIONAL_SERVICES:[^\]]+\]/g, '')
                         .replace(/\n?\[COUPON_CODE:[^\]]+\]/g, '')
                         .trim()
-                      
+                     
                       if (!notesWithoutIds) return null
-                      
+                     
                       return (
                         <div className="pay-info-row">
                           <span className="pay-info-label">Ghi chú</span>
@@ -1101,6 +1192,7 @@ const PaymentPage = () => {
                       )
                     })()}
                   </div>
+
 
                   {/* Complementary Services Section */}
                   {canPay && (
@@ -1118,17 +1210,20 @@ const PaymentPage = () => {
               </Card>
             </div>
 
+
             {/* Right Column - Payment Summary */}
             <div className="payment-right">
               <Card className="pay-payment-summary-card">
                 <CardContent>
                   <h2 className="pay-card-title">Tóm tắt thanh toán</h2>
 
+
                   <div className="pay-payment-summary-content">
                     <div className="pay-summary-row">
                       <span className="pay-summary-label">Giá dịch vụ</span>
                       <span className="pay-summary-value">{formatPrice(hasDiscount ? originalTotal : totalAmount)}</span>
                     </div>
+
 
                     {additionalServicesTotal > 0 && (
                       <>
@@ -1147,6 +1242,7 @@ const PaymentPage = () => {
                       </>
                     )}
 
+
                     {hasDiscount && (
                       <>
                         <div className="pay-summary-divider"></div>
@@ -1159,11 +1255,13 @@ const PaymentPage = () => {
                       </>
                     )}
 
+
                     <div className="pay-summary-divider"></div>
                     <div className="pay-summary-row summary-row-total">
                       <span className="pay-summary-label">Thành tiền</span>
                       <span className="pay-summary-value pay-summary-total">{formatPrice(finalTotal)}</span>
                     </div>
+
 
                     {paymentStatus && (paymentStatus.Amount || paymentStatus.amount || 0) > 0 && (
                       <>
@@ -1178,6 +1276,7 @@ const PaymentPage = () => {
                     )}
                   </div>
 
+
                   {error && (
                     <div className="pay-alert pay-alert-error">
                       <AlertCircleIcon className="pay-alert-icon" />
@@ -1188,6 +1287,7 @@ const PaymentPage = () => {
                     </div>
                   )}
 
+
                   {isPaid || bookingStatusLower === 'confirmed' || bookingStatusLower === 'completed' ? (
                     <div className="pay-payment-success-box">
                       <CheckCircleIcon className="pay-success-icon" />
@@ -1196,9 +1296,9 @@ const PaymentPage = () => {
                         <p>Đơn đặt dịch vụ của bạn đã được thanh toán thành công.</p>
                       </div>
                       <div style={{ display: 'flex', gap: '0.75rem', flexDirection: 'column', width: '100%' }}>
-                        <Button 
-                          variant="default" 
-                          onClick={() => navigate(`/payment/success/${bookingIdValue}`)} 
+                        <Button
+                          variant="default"
+                          onClick={() => navigate(`/payment/success/${bookingIdValue}`)}
                           className="pay-success-button"
                         >
                           Xem chi tiết thanh toán
@@ -1234,10 +1334,10 @@ const PaymentPage = () => {
                       }}>
                         <span style={{ fontSize: '24px', flexShrink: 0 }}>⚠️</span>
                         <div>
-                          <p style={{ 
-                            margin: 0, 
-                            fontSize: '14px', 
-                            fontWeight: '600', 
+                          <p style={{
+                            margin: 0,
+                            fontSize: '14px',
+                            fontWeight: '600',
                             color: '#92400e',
                             lineHeight: '1.5'
                           }}>
@@ -1245,6 +1345,7 @@ const PaymentPage = () => {
                           </p>
                         </div>
                       </div>
+
 
                       <Button
                         variant="default"
@@ -1263,11 +1364,13 @@ const PaymentPage = () => {
                         )}
                       </Button>
 
+
                       <p className="pay-payment-hint">
                         Bạn sẽ được chuyển đến trang thanh toán PayOS để hoàn tất giao dịch
                       </p>
                     </div>
                   )}
+
 
                   <div className="pay-payment-info-box">
                     <div className="pay-info-box-content">
@@ -1289,11 +1392,6 @@ const PaymentPage = () => {
   )
 }
 
+
 export default PaymentPage
-
-
-
-
-
-
 

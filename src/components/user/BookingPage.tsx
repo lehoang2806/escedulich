@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axiosInstance from '~/utils/axiosInstance';
@@ -1147,13 +1148,19 @@ const BookingPage = () => {
 
       // Chuẩn bị booking data - chỉ gửi các field backend cần (theo CreateBookingDto)
       // Backend sẽ tự tính: BookingNumber, UnitPrice, TotalAmount, Status (mặc định "pending")
+      
+      // Tạo BookingDate với local time (không dùng toISOString vì nó convert sang UTC)
+      // Format: "YYYY-MM-DDTHH:mm:ss" - backend sẽ parse đúng local time
+      const now = new Date();
+      const localBookingDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      
       const bookingData: any = {
         // Required fields
         UserId: userId,
         ServiceComboId: parseInt(id),
         Quantity: quantity,
         ItemType: 'combo', // Backend expect "combo" hoặc "service"
-        BookingDate: new Date().toISOString(),
+        BookingDate: localBookingDate,
         // Optional fields
         Notes: bookingNotes || null,
       };
@@ -2015,6 +2022,4 @@ const BookingPage = () => {
 };
 
 export default BookingPage;
-
-
 
