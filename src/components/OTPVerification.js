@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import './OTPVerification.css';
-import { verifyOtp, verifyOtpForRegister, forgotPassword, requestOtpForRegister, register } from '../API/Au';
+import { verifyOtp, verifyOtpForRegister, forgotPassword, requestOtpForRegister, register } from '../api/Au';
 
 const OTPVerification = () => {
   const navigate = useNavigate();

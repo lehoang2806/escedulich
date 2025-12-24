@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Register.css';
-import { requestOtpForRegister } from '../API/Au';
+import { requestOtpForRegister } from '../api/Au';
 
 const Register = () => {
   const navigate = useNavigate();

@@ -498,8 +498,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
-import { getCurrentUser } from '../API/SocialMediaApi';
-import { getAllBookings, updateBookingStatus, updateBooking } from '../API/BookingApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
+import { getAllBookings, updateBookingStatus, updateBooking } from '../api/BookingApi';
 
 const BookingManager = () => {
   const [sidebarActive, setSidebarActive] = useState(false);

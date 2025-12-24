@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './LoginForm.css';
-import { login } from '../API/Au';
+import { login } from '../api/Au';
 import { useNavigate } from 'react-router-dom';
 import { signInToFirebase } from '../services/firebaseAuth';
 

@@ -1,9 +1,9 @@
 import './CouponManager.css';
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getCouponsByComboId, deleteCoupon } from '../API/CouponApi';
+import { getCouponsByComboId, deleteCoupon } from '../api/CouponApi';
 import Header from './Header';
-import { getCurrentUser } from '../API/SocialMediaApi';
+import { getCurrentUser } from '../api/SocialMediaApi';
 
 const CouponManager = () => {
   const location = useLocation();

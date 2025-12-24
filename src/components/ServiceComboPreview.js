@@ -1,7 +1,7 @@
 import './ServiceComboPreview.css';
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getServiceComboById, getServicesByComboId } from '../API/ServiceComboApi';
+import { getServiceComboById, getServicesByComboId } from '../api/ServiceComboApi';
 import Header from './Header';
 
 // Dùng cùng domain với API deploy

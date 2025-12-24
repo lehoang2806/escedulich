@@ -21,14 +21,18 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [{ find: '~', replacement: '/src' }]
     },
+    esbuild: {
+      drop: ['console', 'debugger'] // Xóa console.* và debugger khi build production
+    },
     build: {
       outDir: 'dist',
       rollupOptions: {
         output: {
           manualChunks: (id) => {
-            // Do not split Material-UI into its own chunk — keep default vendor grouping
-            // (separating MUI into a dedicated chunk can cause initialization order
-            // issues and "Cannot access 'fn' before initialization" errors.)
+            // Tách Material-UI thành chunk riêng
+            if (id.includes('@mui/material') || id.includes('@mui/icons-material') || id.includes('@emotion')) {
+              return 'mui'
+            }
             
             // Tách Firebase thành chunk riêng
             if (id.includes('firebase')) {
@@ -69,7 +73,7 @@ export default defineConfig(({ mode }) => {
       },
       // Tối ưu chunk size warnings
       chunkSizeWarningLimit: 1000,
-      // Tối ưu minification
+      // Tối ưu minification - dùng esbuild để drop console
       minify: 'esbuild',
       // Source maps cho production (có thể tắt để giảm size)
       sourcemap: false
