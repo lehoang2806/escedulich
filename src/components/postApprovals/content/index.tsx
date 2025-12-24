@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useMemo } from 'react'
 import {
   Box, Card, CardContent, CardHeader, Avatar, Typography, Chip, Button,
@@ -19,6 +20,8 @@ import {
   getPendingPosts, approvePost, rejectPost,
   type PendingPost
 } from '~/api/instances/PostApprovalApi'
+import { useNotification } from '~/contexts/NotificationContext'
+
 
 const statusMeta: Record<string, { label: string; color: 'warning' | 'success' | 'error' | 'info'; bg: string }> = {
   Pending: { label: 'Chờ duyệt', color: 'warning', bg: 'rgba(255,193,7,0.12)' },
@@ -27,42 +30,44 @@ const statusMeta: Record<string, { label: string; color: 'warning' | 'success' |
   Review: { label: 'Yêu cầu sửa', color: 'info', bg: 'rgba(3,169,244,0.12)' }
 }
 
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return 'Chưa cập nhật'
-  
+ 
   // Thử parse date với nhiều format khác nhau
   let date: Date
-  
+ 
   // Nếu là số (timestamp)
   if (typeof value === 'number' || /^\d+$/.test(value)) {
     date = new Date(Number(value))
   } else {
     // Thử parse trực tiếp
     date = new Date(value)
-    
+   
     // Nếu không hợp lệ, thử thêm 'Z' cho UTC
     if (Number.isNaN(date.getTime()) && !value.endsWith('Z') && !value.includes('+')) {
       date = new Date(value + 'Z')
     }
   }
-  
+ 
   // Kiểm tra date có hợp lệ không
   if (Number.isNaN(date.getTime())) {
     console.warn('[PostApprovals] Invalid date value:', value)
     return 'Chưa cập nhật'
   }
-  
+ 
   return date.toLocaleString('vi-VN')
 }
+
 
 export default function PostApprovalsContent() {
   const [posts, setPosts] = useState<PendingPost[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
   const [processingId, setProcessingId] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  
+  const { showToast } = useNotification()
+ 
   const [rejectDialog, setRejectDialog] = useState<{ open: boolean; post: PendingPost | null; comment: string; error: string }>({
     open: false, post: null, comment: '', error: ''
   })
@@ -77,6 +82,7 @@ export default function PostApprovalsContent() {
   })
   const [expandedPosts, setExpandedPosts] = useState<Set<number>>(new Set())
 
+
   // Filter posts based on search query
   const filteredPosts = useMemo(() => {
     if (!searchQuery.trim()) return posts
@@ -88,6 +94,7 @@ export default function PostApprovalsContent() {
       post.posterId?.toString().includes(query)
     )
   }, [posts, searchQuery])
+
 
   const loadPosts = async (showLoading = true) => {
     try {
@@ -102,31 +109,38 @@ export default function PostApprovalsContent() {
     }
   }
 
+
   useEffect(() => {
     loadPosts()
-    
+   
     // Auto-refresh mỗi 10 giây để cập nhật bài viết mới
     const intervalId = setInterval(() => {
       loadPosts(false) // Không hiện loading khi auto-refresh
     }, 10000)
-    
+   
     return () => clearInterval(intervalId)
   }, [])
 
+
   const handleApprove = async () => {
     if (!approveDialog.post) return
+    const postToApprove = approveDialog.post
     try {
-      setProcessingId(approveDialog.post.id)
-      await approvePost(approveDialog.post.id)
-      setSuccess(`Đã phê duyệt bài viết của ${approveDialog.post.posterName}`)
+      setProcessingId(postToApprove.id)
+      await approvePost(postToApprove.id)
+      // Đóng dialog ngay lập tức
       setApproveDialog({ open: false, post: null })
-      await loadPosts()
+      // Hiển thị toast ở góc phải
+      showToast(`Đã phê duyệt bài viết của ${postToApprove.posterName}`, '', 'success')
+      // Load lại danh sách (không block UI)
+      loadPosts(false)
     } catch (err: any) {
       setError(err?.message || 'Không thể phê duyệt bài viết')
     } finally {
       setProcessingId(null)
     }
   }
+
 
   const handleReject = async () => {
     if (!rejectDialog.post || !rejectDialog.comment.trim()) {
@@ -136,7 +150,8 @@ export default function PostApprovalsContent() {
     try {
       setProcessingId(rejectDialog.post.id)
       await rejectPost(rejectDialog.post.id, rejectDialog.comment)
-      setSuccess(`Đã từ chối bài viết của ${rejectDialog.post.posterName}`)
+      // Hiển thị toast ở góc phải
+      showToast(`Đã từ chối bài viết của ${rejectDialog.post.posterName}`, '', 'warning')
       setRejectDialog({ open: false, post: null, comment: '', error: '' })
       await loadPosts()
     } catch (err: any) {
@@ -145,6 +160,7 @@ export default function PostApprovalsContent() {
       setProcessingId(null)
     }
   }
+
 
   return (
     <Stack spacing={3}>
@@ -213,16 +229,12 @@ export default function PostApprovalsContent() {
               )
             }}
           />
-          {success && (
-            <Alert severity="success" sx={{ borderRadius: '1.2rem', mb: 2 }} onClose={() => setSuccess(null)}>
-              {success}
-            </Alert>
-          )}
           {error && (
             <Alert severity="error" sx={{ borderRadius: '1.2rem', mb: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
           )}
+
 
           {loading ? (
             <Stack spacing={2}>
@@ -280,11 +292,13 @@ export default function PostApprovalsContent() {
                               <Chip label={meta.label} color={meta.color} size="small" sx={{ fontWeight: 600 }} />
                             </Stack>
 
+
                             {post.articleTitle && (
                               <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main', mt: 1 }}>
                                 {post.articleTitle}
                               </Typography>
                             )}
+
 
                             <Box
                               sx={{
@@ -320,6 +334,7 @@ export default function PostApprovalsContent() {
                               )}
                             </Box>
 
+
                             {post.images && post.images.length > 0 && (
                               <Button
                                 startIcon={<ImageIcon />}
@@ -332,6 +347,7 @@ export default function PostApprovalsContent() {
                               </Button>
                             )}
 
+
                             <Button
                               startIcon={<ArticleIcon />}
                               onClick={() => setViewPostDialog({ open: true, post })}
@@ -341,6 +357,7 @@ export default function PostApprovalsContent() {
                             >
                               Xem chi tiết bài viết
                             </Button>
+
 
                             {post.hashtags && post.hashtags.length > 0 && (
                               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -355,6 +372,7 @@ export default function PostApprovalsContent() {
                               </Box>
                             )}
 
+
                             {post.rejectComment && (
                               <Alert severity="warning" sx={{ borderRadius: '0.8rem', mt: 1 }}>
                                 Ghi chú: {post.rejectComment}
@@ -362,6 +380,7 @@ export default function PostApprovalsContent() {
                             )}
                           </Stack>
                         </Grid>
+
 
                         <Grid size={{ xs: 12, md: 4 }}>
                           <Stack spacing={1.2}>
@@ -407,6 +426,7 @@ export default function PostApprovalsContent() {
         </CardContent>
       </Card>
 
+
       {/* Approve Dialog */}
       <Dialog open={approveDialog.open} onClose={() => setApproveDialog({ open: false, post: null })} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>Xác nhận phê duyệt</DialogTitle>
@@ -443,6 +463,7 @@ export default function PostApprovalsContent() {
           </Button>
         </DialogActions>
       </Dialog>
+
 
       {/* Reject Dialog */}
       <Dialog open={rejectDialog.open} onClose={() => setRejectDialog({ open: false, post: null, comment: '', error: '' })} maxWidth="sm" fullWidth>
@@ -487,6 +508,7 @@ export default function PostApprovalsContent() {
         </DialogActions>
       </Dialog>
 
+
       {/* Image Dialog */}
       <Dialog open={imageDialog.open} onClose={() => setImageDialog({ open: false, images: [] })} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>Hình ảnh bài viết</DialogTitle>
@@ -506,11 +528,12 @@ export default function PostApprovalsContent() {
         </DialogActions>
       </Dialog>
 
+
       {/* View Post Detail Dialog */}
-      <Dialog 
-        open={viewPostDialog.open} 
-        onClose={() => setViewPostDialog({ open: false, post: null })} 
-        maxWidth="md" 
+      <Dialog
+        open={viewPostDialog.open}
+        onClose={() => setViewPostDialog({ open: false, post: null })}
+        maxWidth="md"
         fullWidth
         PaperProps={{
           sx: { borderRadius: '1.5rem', maxHeight: '90vh' }
@@ -542,7 +565,7 @@ export default function PostApprovalsContent() {
                   {viewPostDialog.post.articleTitle}
                 </Typography>
               )}
-              
+             
               <Box
                 sx={{
                   p: 2,
@@ -556,6 +579,7 @@ export default function PostApprovalsContent() {
                 </Typography>
               </Box>
 
+
               {viewPostDialog.post.images && viewPostDialog.post.images.length > 0 && (
                 <Box>
                   <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -563,30 +587,31 @@ export default function PostApprovalsContent() {
                   </Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
                     {viewPostDialog.post.images.map((img, idx) => (
-                      <Box 
-                        key={idx} 
-                        sx={{ 
+                      <Box
+                        key={idx}
+                        sx={{
                           width: viewPostDialog.post!.images!.length === 1 ? '100%' : 'calc(50% - 8px)',
                           cursor: 'pointer',
                           '&:hover': { opacity: 0.9 }
                         }}
                         onClick={() => window.open(img, '_blank')}
                       >
-                        <img 
-                          src={img} 
-                          alt={`Image ${idx + 1}`} 
-                          style={{ 
-                            width: '100%', 
+                        <img
+                          src={img}
+                          alt={`Image ${idx + 1}`}
+                          style={{
+                            width: '100%',
                             borderRadius: 12,
                             maxHeight: 400,
                             objectFit: 'cover'
-                          }} 
+                          }}
                         />
                       </Box>
                     ))}
                   </Box>
                 </Box>
               )}
+
 
               {viewPostDialog.post.hashtags && viewPostDialog.post.hashtags.length > 0 && (
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -601,6 +626,7 @@ export default function PostApprovalsContent() {
                 </Box>
               )}
 
+
               {viewPostDialog.post.rejectComment && (
                 <Alert severity="warning" sx={{ borderRadius: '0.8rem' }}>
                   Ghi chú trước đó: {viewPostDialog.post.rejectComment}
@@ -610,8 +636,8 @@ export default function PostApprovalsContent() {
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-          <Button 
-            onClick={() => setViewPostDialog({ open: false, post: null })} 
+          <Button
+            onClick={() => setViewPostDialog({ open: false, post: null })}
             sx={{ borderRadius: '0.8rem' }}
           >
             Đóng
@@ -649,3 +675,6 @@ export default function PostApprovalsContent() {
     </Stack>
   )
 }
+
+
+

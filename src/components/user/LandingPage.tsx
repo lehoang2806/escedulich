@@ -396,6 +396,15 @@ const LandingPage = () => {
     }
 
     fetchReviews()
+
+    // Polling: tự động fetch reviews mới mỗi 30 giây
+    const pollInterval = setInterval(() => {
+      if (!loadingReviews) {
+        fetchReviews()
+      }
+    }, 30000) // 30 giây
+
+    return () => clearInterval(pollInterval)
   }, [])
 
   // Auto carousel cho reviews
@@ -517,7 +526,7 @@ const LandingPage = () => {
         const ratingB = b.rating || 0
         return ratingB - ratingA // Giảm dần
       })
-      .slice(0, 6) // Chỉ lấy 6 service có rating cao nhất
+      .slice(0, 8) // Chỉ lấy 8 service có rating cao nhất
 
     console.log('[LandingPage] Services sau khi map và sắp xếp theo rating:', activeServices)
     console.log('[LandingPage] Số lượng services sau khi map:', activeServices.length)
@@ -533,8 +542,8 @@ const LandingPage = () => {
       })
     })
 
-    // Đảm bảo chỉ trả về tối đa 6 services
-    return activeServices.slice(0, 6)
+    // Đảm bảo chỉ trả về tối đa 8 services
+    return activeServices.slice(0, 8)
   }, [tours, loading, error, mapServiceComboToService, ratings])
 
   // Hiển thị reviews theo carousel (6 reviews, hiển thị 3 mỗi lần)
@@ -737,7 +746,7 @@ const LandingPage = () => {
 
             {loading ? (
               <div className="services-grid">
-                {[...Array(6)].map((_, index) => (
+                {[...Array(8)].map((_, index) => (
                   <div key={index} className="lp-service-card-skeleton">
                     <Card className="lp-service-card-inner">
                       <div className="lp-service-image-wrapper" style={{ backgroundColor: '#f1f5f9', height: '220px' }}></div>

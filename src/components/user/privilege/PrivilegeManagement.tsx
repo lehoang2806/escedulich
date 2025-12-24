@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo, useRef } from 'react';
 import Button from '../ui/Button';
 import LoadingSpinner from '../LoadingSpinner';
 import { GridIcon } from '../icons/index';
@@ -41,6 +41,9 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deletingPromotion, setDeletingPromotion] = useState<{ id: number; name: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Ref để skip page reset khi update/delete
+  const skipPageResetRef = useRef(false);
   
   // Filter and sort function for promotions
   const applyPromotionFilters = useCallback((promotionList, nameFilter, statusFilter, order) => {
@@ -95,7 +98,7 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
     }
   }, []);
 
-  // Load promotions (bonus services) from API
+  // Load promotions (bonus services) from API - chỉ load 1 lần khi mount
   useEffect(() => {
     const loadPromotions = async () => {
       try {
@@ -121,14 +124,19 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
     };
 
     loadPromotions();
-  }, [onError, getUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getUserId]); // Chỉ load khi mount
 
   // Apply filters when filter values change
   useEffect(() => {
     const filtered = applyPromotionFilters(promotions, promotionFilterName, promotionFilterStatus, promotionSortOrder);
     setFilteredPromotions(filtered);
-    setPromotionCurrentPage(1);
-    setPromotionPageInput('');
+    // Chỉ reset page nếu không phải do update/delete
+    if (!skipPageResetRef.current) {
+      setPromotionCurrentPage(1);
+      setPromotionPageInput('');
+    }
+    skipPageResetRef.current = false;
   }, [promotionFilterName, promotionFilterStatus, promotionSortOrder, promotions, applyPromotionFilters]);
 
   // Calculate priv-mgr-pagination values using useMemo - with safe defaults
@@ -211,10 +219,11 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
     try {
       await axiosInstance.delete(`${API_BASE_URL}/BonusService/${deletingPromotion.id}`);
       
+      // Skip page reset khi delete
+      skipPageResetRef.current = true;
+      
       const updatedPromotions = promotions.filter(p => (p.Id || p.id) !== deletingPromotion.id);
       setPromotions(updatedPromotions);
-      const filtered = applyPromotionFilters(updatedPromotions, promotionFilterName, promotionFilterStatus, promotionSortOrder);
-      setFilteredPromotions(filtered);
       
       if (onSuccess) {
         onSuccess('Ưu đãi đã được xóa thành công!');
@@ -462,19 +471,11 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
         hostId={getUserId()}
         onSuccess={onSuccess}
         onError={onError}
-        onCreated={() => {
-          // Reload promotions after creation
-          const loadPromotions = async () => {
-            try {
-              const userId = getUserId();
-              if (!userId) return;
-              const response = await axiosInstance.get(`${API_BASE_URL}/BonusService/host/${userId}`);
-              setPromotions(response.data || []);
-            } catch (err) {
-              console.error('Error reloading promotions:', err);
-            }
-          };
-          loadPromotions();
+        onCreated={(newPromotion) => {
+          // Thêm promotion mới vào state local (không reload API)
+          if (newPromotion) {
+            setPromotions(prev => [newPromotion, ...prev]);
+          }
         }}
       />
 
@@ -486,19 +487,16 @@ const PrivilegeManagement = forwardRef<PrivilegeManagementRef, PrivilegeManageme
         bonusService={promotions.find(p => (p.Id || p.id) === editingPromotionId) || null}
         onSuccess={onSuccess}
         onError={onError}
-        onUpdated={() => {
-          // Reload promotions after update
-          const loadPromotions = async () => {
-            try {
-              const userId = getUserId();
-              if (!userId) return;
-              const response = await axiosInstance.get(`${API_BASE_URL}/BonusService/host/${userId}`);
-              setPromotions(response.data || []);
-            } catch (err) {
-              console.error('Error reloading promotions:', err);
-            }
-          };
-          loadPromotions();
+        onUpdated={(updatedPromotion) => {
+          // Skip page reset khi update
+          skipPageResetRef.current = true;
+          
+          // Cập nhật promotion trong state local (không reload API)
+          if (updatedPromotion) {
+            setPromotions(prev => 
+              prev.map(p => (p.Id || p.id) === (updatedPromotion.Id || updatedPromotion.id) ? updatedPromotion : p)
+            );
+          }
         }}
       />
 

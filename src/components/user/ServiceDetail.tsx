@@ -21,6 +21,7 @@ import {
 } from './icons/index';
 import { formatPrice, getImageUrl } from '~/lib/utils';
 import { API_ENDPOINTS, API_BASE_URL } from '~/config/api';
+import { useNotification } from '~/contexts/NotificationContext';
 import './ServiceDetail.css';
 
 // Sử dụng đường dẫn public URL thay vì import
@@ -217,6 +218,7 @@ const ServiceDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { addNotification } = useNotification();
   const reviewSectionRef = useRef<HTMLDivElement>(null);
   const [service, setService] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -437,6 +439,26 @@ const ServiceDetail = () => {
           throw new Error('Không nhận được dữ liệu từ server.');
         }
         
+        // Kiểm tra Host có bị khóa không
+        const hostId = response.data.HostId || response.data.hostId;
+        if (hostId) {
+          try {
+            const hostResponse = await axiosInstance.get(`${API_ENDPOINTS.USER}/${hostId}`);
+            const hostData = hostResponse.data;
+            if (hostData.IS_BANNED === true || hostData.IsActive === false) {
+              if (import.meta.env.DEV) {
+                console.warn('🚫 [ServiceDetail] Host bị khóa, dịch vụ không khả dụng');
+              }
+              setError('Dịch vụ này hiện không khả dụng.');
+              setLoading(false);
+              return;
+            }
+          } catch (err) {
+            // Nếu không lấy được thông tin Host, vẫn cho phép xem
+            console.warn('⚠️ [ServiceDetail] Không thể kiểm tra trạng thái Host');
+          }
+        }
+        
         setService(response.data);
         
         // Fetch average rating
@@ -520,14 +542,40 @@ const ServiceDetail = () => {
         const response = await axiosInstance.get(API_ENDPOINTS.SERVICE_COMBO);
         const allServices = response.data || [];
         
-        // Loại trừ service hiện tại và lấy 4 services khác
+        // Lấy danh sách unique HostIds để kiểm tra trạng thái
+        const hostIds = [...new Set(allServices.map((s: any) => s.HostId || s.hostId).filter(Boolean))] as number[];
+        
+        // Fetch thông tin các Host để kiểm tra trạng thái bị khóa
+        const bannedHostIds = new Set<number>();
+        
+        await Promise.all(
+          hostIds.map(async (hostId) => {
+            try {
+              const userResponse = await axiosInstance.get(`${API_ENDPOINTS.USER}/${hostId}`);
+              const userData = userResponse.data;
+              // Kiểm tra nếu Host bị khóa (IS_BANNED = true hoặc IsActive = false)
+              if (userData.IS_BANNED === true || userData.IsActive === false) {
+                bannedHostIds.add(hostId);
+              }
+            } catch (err) {
+              // Nếu không lấy được thông tin Host, vẫn hiển thị dịch vụ
+              console.warn(`⚠️ [ServiceDetail] Không thể kiểm tra trạng thái Host ${hostId}`);
+            }
+          })
+        );
+        
+        // Loại trừ service hiện tại, services của Host bị khóa, và lấy 4 services khác
         // Backend trả về status = "approved" cho ServiceCombo đã được duyệt
         const filtered = allServices
           .filter(s => {
             const serviceId = s.Id || s.id;
             const serviceStatus = (s.Status || s.status || 'open').toLowerCase();
+            const hostId = s.HostId || s.hostId;
             // Chấp nhận cả "approved" và "open" làm status hợp lệ
-            return serviceId !== parseInt(id) && (serviceStatus === 'open' || serviceStatus === 'approved');
+            // Loại trừ services của Host bị khóa
+            return serviceId !== parseInt(id) && 
+                   (serviceStatus === 'open' || serviceStatus === 'approved') &&
+                   !bannedHostIds.has(hostId);
           })
           .slice(0, 4)
           .map(s => {
@@ -658,6 +706,16 @@ const ServiceDetail = () => {
     };
 
     fetchReviews();
+
+    // Polling: tự động fetch reviews mới mỗi 30 giây để thấy đánh giá từ người khác
+    const pollInterval = setInterval(() => {
+      // Chỉ poll khi không đang loading và không đang edit/submit
+      if (!loadingReviews && !submittingReview && !editingReviewId) {
+        fetchReviews();
+      }
+    }, 30000); // 30 giây
+
+    return () => clearInterval(pollInterval);
   }, [id]);
 
   // Check if user can review this service - Sử dụng API backend đúng logic
@@ -787,15 +845,41 @@ const ServiceDetail = () => {
     if (state?.openReview && state?.bookingId) {
       // Set bookingId từ state
       setSelectedBookingId(state.bookingId);
-      setCanReview(true);
       
-      // Mở form review và scroll đến phần review
-      setShowReviewForm(true);
+      // Kiểm tra với backend xem user có thể review không trước khi mở form
+      const checkAndOpenReview = async () => {
+        try {
+          const userId = getUserId();
+          if (!userId) {
+            setCanReview(false);
+            return;
+          }
+          
+          const canReviewResponse = await axiosInstance.get(
+            `${API_ENDPOINTS.REVIEW}/booking/${state.bookingId}/user/${userId}/can-review`
+          );
+          
+          const canReviewData = canReviewResponse.data || {};
+          if (canReviewData.CanReview === true || canReviewData.canReview === true) {
+            setCanReview(true);
+            // Mở form review và scroll đến phần review
+            setShowReviewForm(true);
+            
+            // Scroll đến phần review sau khi component render
+            setTimeout(() => {
+              reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 500);
+          } else {
+            setCanReview(false);
+            // Không mở form nếu user không có quyền review
+          }
+        } catch (err) {
+          console.error('Lỗi khi kiểm tra can review từ navigation:', err);
+          setCanReview(false);
+        }
+      };
       
-      // Scroll đến phần review sau khi component render
-      setTimeout(() => {
-        reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 500);
+      checkAndOpenReview();
       
       // Clear state để tránh mở lại khi refresh
       navigate(location.pathname, { replace: true, state: {} });
@@ -1146,16 +1230,88 @@ const ServiceDetail = () => {
       
       await axiosInstance.post(`${API_ENDPOINTS.REVIEW}`, reviewData);
       
-      // Reset form và reload reviews
+      // Reset form
       setReviewForm({ rating: 5, comment: '' });
       setShowReviewForm(false);
       
-      await reloadReviews();
+      // Optimistic update: thêm review mới vào đầu list ngay lập tức
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo');
+      let currentUserInfo: any = null;
+      if (userInfoStr) {
+        try {
+          currentUserInfo = JSON.parse(userInfoStr);
+        } catch (e) {
+          console.error('Error parsing userInfo:', e);
+        }
+      }
+      
+      const newReview = {
+        Id: `temp-${Date.now()}`, // Temporary ID
+        id: `temp-${Date.now()}`,
+        BookingId: parsedBookingId,
+        bookingId: parsedBookingId,
+        UserId: parsedUserId,
+        userId: parsedUserId,
+        Rating: parsedRating,
+        rating: parsedRating,
+        Comment: reviewForm.comment?.trim() || null,
+        comment: reviewForm.comment?.trim() || null,
+        CreatedDate: new Date().toISOString(),
+        createdDate: new Date().toISOString(),
+        Status: 'pending',
+        status: 'pending',
+        // User object for display (để render avatar đúng cách)
+        User: {
+          Id: parsedUserId,
+          id: parsedUserId,
+          Name: currentUserInfo?.Name || currentUserInfo?.name || 'Bạn',
+          name: currentUserInfo?.Name || currentUserInfo?.name || 'Bạn',
+          Avatar: currentUserInfo?.Avatar || currentUserInfo?.avatar || null,
+          avatar: currentUserInfo?.Avatar || currentUserInfo?.avatar || null,
+        },
+        user: {
+          Id: parsedUserId,
+          id: parsedUserId,
+          Name: currentUserInfo?.Name || currentUserInfo?.name || 'Bạn',
+          name: currentUserInfo?.Name || currentUserInfo?.name || 'Bạn',
+          Avatar: currentUserInfo?.Avatar || currentUserInfo?.avatar || null,
+          avatar: currentUserInfo?.Avatar || currentUserInfo?.avatar || null,
+        },
+        // Legacy fields for backward compatibility
+        userName: currentUserInfo?.Name || currentUserInfo?.name || 'Bạn',
+        userAvatar: currentUserInfo?.Avatar || currentUserInfo?.avatar || null,
+        // Service info
+        serviceName: service?.Name || service?.name || '',
+        serviceImage: service?.Images?.[0] || service?.images?.[0] || service?.Image || service?.image || null,
+      };
+      
+      setReviews(prev => [newReview, ...prev]);
+      
+      // Update average rating locally
+      const newTotalRatings = reviews.length + 1;
+      const currentTotalScore = averageRating * reviews.length;
+      const newAverageRating = (currentTotalScore + parsedRating) / newTotalRatings;
+      setAverageRating(Math.round(newAverageRating * 10) / 10);
       
       // Reload can-review status sau khi submit review (user đã review nên canReview = false)
       await checkCanReview();
       
       showToast('success', 'Gửi đánh giá thành công!', 'Cảm ơn bạn đã đánh giá dịch vụ.');
+      
+      // Gửi thông báo cho user
+      const currentUserId = getUserId();
+      if (currentUserId) {
+        const serviceName = service?.Name || service?.name || 'Dịch vụ';
+        const stars = '⭐'.repeat(parsedRating);
+        addNotification({
+          Id: Date.now(),
+          UserId: currentUserId,
+          Title: '📝 Đã gửi đánh giá',
+          Message: `Bạn đã đánh giá ${stars} cho dịch vụ "${serviceName}". Cảm ơn bạn đã chia sẻ trải nghiệm!`,
+          IsRead: false,
+          CreatedAt: new Date().toISOString()
+        });
+      }
     } catch (err) {
       if (process.env.NODE_ENV === 'development') {
         console.error(' Lỗi khi gửi review:', err);
@@ -1191,20 +1347,45 @@ const ServiceDetail = () => {
 
     try {
       setSubmittingReview(true);
-      // Backend yêu cầu: Rating (int, Required, Range 1-5), Comment (string?, Optional, MaxLength 1000)
-      // Backend dùng Comment, không phải Content
       const reviewData = {
-        Rating: parseInt(editForm.rating.toString(), 10), // Đảm bảo là integer (1-5)
-        Comment: editForm.comment && editForm.comment.trim() ? editForm.comment.trim() : null // Gửi null nếu rỗng
+        Rating: parseInt(editForm.rating.toString(), 10),
+        Comment: editForm.comment && editForm.comment.trim() ? editForm.comment.trim() : null
       };
 
       await axiosInstance.put(`${API_ENDPOINTS.REVIEW}/${editingReviewId}`, reviewData);
       
+      // Optimistic update: cập nhật review trong state ngay lập tức
+      setReviews(prev => prev.map(review => {
+        const reviewId = review.Id || review.id;
+        if (reviewId === editingReviewId) {
+          return {
+            ...review,
+            Rating: reviewData.Rating,
+            rating: reviewData.Rating,
+            Comment: reviewData.Comment,
+            comment: reviewData.Comment,
+          };
+        }
+        return review;
+      }));
+      
+      // Update average rating locally
+      const oldReview = reviews.find(r => (r.Id || r.id) === editingReviewId);
+      if (oldReview) {
+        const oldRating = oldReview.Rating || oldReview.rating || 0;
+        const newRating = reviewData.Rating;
+        const totalReviews = reviews.length;
+        if (totalReviews > 0) {
+          const currentTotalScore = averageRating * totalReviews;
+          const newTotalScore = currentTotalScore - oldRating + newRating;
+          const newAverageRating = newTotalScore / totalReviews;
+          setAverageRating(Math.round(newAverageRating * 10) / 10);
+        }
+      }
+      
       setEditingReviewId(null);
       setEditForm({ rating: 5, comment: '' });
       setOpenMenuId(null);
-      
-      await reloadReviews();
       
       showToast('success', 'Cập nhật thành công!', 'Đánh giá của bạn đã được cập nhật.');
     } catch (err) {
@@ -1236,11 +1417,30 @@ const ServiceDetail = () => {
       const deleteUrl = `${API_BASE_URL}${API_ENDPOINTS.REVIEW}/${reviewId}`;
       console.log('🗑️ [ServiceDetail] Đang xóa review:', { reviewId, deleteUrl });
       
+      // Lưu review cũ để tính toán average rating
+      const deletedReview = reviews.find(r => (r.Id || r.id) === reviewId);
+      const deletedRating = deletedReview?.Rating || deletedReview?.rating || 0;
+      
       await axiosInstance.delete(`${API_ENDPOINTS.REVIEW}/${reviewId}`);
       
       console.log('✅ [ServiceDetail] Xóa review thành công');
       
-      await reloadReviews();
+      // Optimistic update: xóa review khỏi state ngay lập tức
+      setReviews(prev => prev.filter(review => {
+        const rId = review.Id || review.id;
+        return rId !== reviewId;
+      }));
+      
+      // Update average rating locally
+      const totalReviews = reviews.length;
+      if (totalReviews > 1) {
+        const currentTotalScore = averageRating * totalReviews;
+        const newTotalScore = currentTotalScore - deletedRating;
+        const newAverageRating = newTotalScore / (totalReviews - 1);
+        setAverageRating(Math.round(newAverageRating * 10) / 10);
+      } else {
+        setAverageRating(0);
+      }
       
       // Reload can-review status sau khi delete review (user có thể review lại)
       await checkCanReview();
@@ -1354,7 +1554,6 @@ const ServiceDetail = () => {
   const serviceDescription = service.Description || service.description || '';
   const availableSlots = service.AvailableSlots !== undefined ? service.AvailableSlots : (service.availableSlots !== undefined ? service.availableSlots : 0);
   const status = service.Status || service.status || 'open';
-  const cancellationPolicy = service.CancellationPolicy || service.cancellationPolicy || null;
   const statusBadge = getStatusBadge(status);
   // Sử dụng calculatedAverageRating từ reviews để đồng bộ tất cả các vị trí hiển thị rating
   const rating = calculatedAverageRating;
@@ -1461,15 +1660,6 @@ const ServiceDetail = () => {
                     </div>
                     <div className="sd-highlight-item">
                       <div className="sd-highlight-icon-wrapper">
-                        <UsersIcon className="sd-highlight-icon" />
-                      </div>
-                      <div className="sd-highlight-content">
-                        <h3 className="sd-highlight-title">Đặt dịch vụ theo nhóm</h3>
-                        <p className="sd-highlight-description">Tiết kiệm chi phí khi đặt theo nhóm</p>
-                      </div>
-                    </div>
-                    <div className="sd-highlight-item">
-                      <div className="sd-highlight-icon-wrapper">
                         <ClockIcon className="sd-highlight-icon" />
                       </div>
                       <div className="sd-highlight-content">
@@ -1481,86 +1671,32 @@ const ServiceDetail = () => {
                 </CardContent>
               </Card>
 
-              {/* Service Information and Cancellation Policy - Two Column Layout */}
-              <div className="sd-info-policy-grid">
-                {/* Left Column - Service Information */}
-                <Card className="sd-service-info-card-detail">
-                  <CardContent>
-                    <h2 className="sd-section-title">Thông tin chi tiết</h2>
-                    <div className="sd-detail-info-list">
-                      {serviceAddress && (
-                        <div className="sd-detail-info-item">
-                          <MapPinIcon className="sd-detail-info-icon" />
-                          <div className="sd-detail-info-content">
-                            <span className="sd-detail-info-label">ĐỊA CHỈ</span>
-                            <span className="sd-detail-info-value">{serviceAddress}</span>
-                          </div>
-                        </div>
-                      )}
+              {/* Service Information */}
+              <Card className="sd-service-info-card-detail">
+                <CardContent>
+                  <h2 className="sd-section-title">Thông tin chi tiết</h2>
+                  <div className="sd-detail-info-list">
+                    {serviceAddress && (
                       <div className="sd-detail-info-item">
-                        <ClockIcon className="sd-detail-info-icon" />
+                        <MapPinIcon className="sd-detail-info-icon" />
                         <div className="sd-detail-info-content">
-                          <span className="sd-detail-info-label">SỐ CHỖ CÒN LẠI</span>
-                          <span className="sd-detail-info-value">
-                             {availableSlots > 0 ? `${availableSlots} chỗ` : 'Đã hết chỗ'}
-                          </span>
+                          <span className="sd-detail-info-label">ĐỊA CHỈ</span>
+                          <span className="sd-detail-info-value">{serviceAddress}</span>
                         </div>
+                      </div>
+                    )}
+                    <div className="sd-detail-info-item">
+                      <ClockIcon className="sd-detail-info-icon" />
+                      <div className="sd-detail-info-content">
+                        <span className="sd-detail-info-label">SỐ CHỖ CÒN LẠI</span>
+                        <span className="sd-detail-info-value">
+                           {availableSlots > 0 ? `${availableSlots} chỗ` : 'Đã hết chỗ'}
+                        </span>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-
-                {/* Right Column - Cancellation Policy */}
-                <Card className="sd-policy-card-detail">
-                  <CardContent>
-                    <h2 className="sd-section-title">Chính sách hủy</h2>
-                    {cancellationPolicy ? (
-                      // Hiển thị CancellationPolicy từ API nếu có
-                      <div className="sd-policy-detail-list">
-                        <div className="sd-policy-detail-item">
-                          <svg className="sd-policy-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polyline points="12 6 12 12 16 14"/>
-                          </svg>
-                          <span className="sd-policy-detail-text">{cancellationPolicy}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      // Fallback: Hiển thị policy mặc định nếu API không có
-                      <div className="sd-policy-detail-list">
-                        <div className="sd-policy-detail-item policy-item-48h-before">
-                          <svg className="sd-policy-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polyline points="12 6 12 12 16 14"/>
-                          </svg>
-                          <span className="sd-policy-detail-text">Hủy trước 48h được hoàn 90%</span>
-                        </div>
-                        <div className="sd-policy-detail-item policy-item-48h-within">
-                          <svg className="sd-policy-icon sd-warning" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-                            <path d="M12 9v4"/>
-                            <path d="M12 17h.01"/>
-                          </svg>
-                          <span className="sd-policy-detail-text">Hủy trong vòng 48h hoàn 50%</span>
-                        </div>
-                        <div className="sd-policy-detail-item policy-item-24h-within">
-                          <svg className="sd-policy-icon sd-danger" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="15" y1="9" x2="9" y2="15"/>
-                            <line x1="9" y1="9" x2="15" y2="15"/>
-                          </svg>
-                          <span className="sd-policy-detail-text">Hủy trong vòng 24h không hoàn tiền</span>
-                        </div>
-                      </div>
-                    )}
-                    {!cancellationPolicy && (
-                      <div className="sd-policy-note">
-                        <span className="sd-policy-note-text">* Thời gian tính từ lúc check-in</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Additional Services Section - Chỉ hiển thị khi có dịch vụ thêm */}
               {(!loadingServices && availableServices.length > 0) || loadingServices ? (
@@ -1719,8 +1855,8 @@ const ServiceDetail = () => {
                     </div>
                   )}
 
-                  {/* Review Form */}
-                  {showReviewForm && (
+                  {/* Review Form - Chỉ hiển thị khi user có quyền review */}
+                  {showReviewForm && canReview && (
                     <div className="sd-review-form-container">
                       <div className="sd-review-form-header">
                         <h3 className="sd-review-form-title">Viết đánh giá của bạn</h3>
@@ -1884,7 +2020,9 @@ const ServiceDetail = () => {
                         const reviewId = review.Id || review.id;
                         const user = review.User || review.user;
                         const userName = user?.Name || user?.name || 'Khách hàng';
-                        const userAvatar = user?.Avatar || user?.avatar || '';
+                        // Sử dụng getImageUrl để xử lý avatar URL đúng cách
+                        const rawAvatar = user?.Avatar || user?.avatar || '';
+                        const userAvatar = rawAvatar ? getImageUrl(rawAvatar, '') : '';
                         // Backend dùng UserId, không phải AuthorId
                         const userId = review.UserId || review.userId;
                         const rating = review.Rating || review.rating || 0;

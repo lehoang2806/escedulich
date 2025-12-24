@@ -5,6 +5,7 @@ import NotificationDropdown from '~/components/user/NotificationDropdown'
 import { getNotifications } from '~/api/user/NotificationApi'
 import type { NotificationDto } from '~/api/user/NotificationApi'
 import { calculateLevel, getLevelInfo } from '~/utils/levelUtils'
+import { useUserLevel } from '~/hooks/useUserLevel'
 import './Header.css'
 
 const Header = React.memo(() => {
@@ -19,6 +20,16 @@ const Header = React.memo(() => {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [userInfo, setUserInfo] = useState<any>(null)
   const [unreadCount, setUnreadCount] = useState(0)
+
+  // Lấy userId từ userInfo để sử dụng useUserLevel
+  const userId = useMemo(() => {
+    if (!userInfo) return null
+    const id = userInfo.Id || userInfo.id
+    return id ? parseInt(id) : null
+  }, [userInfo])
+
+  // Sử dụng useUserLevel để lấy level chính xác từ completed bookings
+  const { level: userLevel, levelInfo: userLevelInfo, totalSpent: userTotalSpent } = useUserLevel(userId)
 
   // Kiểm tra đăng nhập - tối ưu để tránh re-render không cần thiết
   useEffect(() => {
@@ -156,13 +167,8 @@ const Header = React.memo(() => {
     // Thêm level cho Tourist (roleId 4) và Agency (roleId 3)
     const roleId = userInfo.RoleId || userInfo.roleId
     if (roleId === 4 || roleId === 3 || roleId === '4' || roleId === '3') {
-      const totalSpent = userInfo.TotalSpent ?? userInfo.totalSpent ?? 0
-      const level = calculateLevel(Number(totalSpent) || 0)
-      const levelInfo = getLevelInfo(level)
-      // Chỉ hiển thị level nếu không phải default
-      if (level !== 'default') {
-        return `${roleName} - ${levelInfo.icon} ${levelInfo.name}`
-      }
+      // Sử dụng level từ useUserLevel hook (đã tính từ completed bookings)
+      return `${roleName} - ${userLevelInfo.icon} ${userLevelInfo.name}`
     }
     
     return roleName

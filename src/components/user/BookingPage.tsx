@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axiosInstance from '~/utils/axiosInstance';
@@ -22,6 +21,7 @@ import ComplementaryServices from './ComplementaryServices';
 import { useUserLevel } from '~/hooks/useUserLevel';
 import type { MembershipTier } from '~/types/membership';
 import * as couponService from '~/services/couponService';
+import { useNotification } from '~/contexts/NotificationContext';
 import './BookingPage.css';
 
 const baNaHillImage = '/img/banahills.jpg';
@@ -53,11 +53,15 @@ const getUserId = () => {
 const BookingPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { connection, addNotification } = useNotification();
   const [service, setService] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [calculatingTotal, setCalculatingTotal] = useState(false);
+  const [hostName, setHostName] = useState<string>(''); // Tên Host
+  const [hostInfo, setHostInfo] = useState<any>(null); // Thông tin đầy đủ của Host
+  const [showHostCard, setShowHostCard] = useState(false); // Hiển thị card visit
   
   // Form state
   const [quantity, setQuantity] = useState(1);
@@ -115,6 +119,19 @@ const BookingPage = () => {
   const { level: userLevel } = useUserLevel(userId);
   // Cast UserLevel sang MembershipTier (cùng values: 'none' | 'bronze' | 'silver' | 'gold')
   const userTier = (userLevel === 'default' ? 'none' : userLevel) as MembershipTier;
+
+  // Kiểm tra user có phải Agency không (RoleId = 3)
+  const isAgency = (() => {
+    try {
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo');
+      if (userInfoStr) {
+        const userInfo = JSON.parse(userInfoStr);
+        const roleId = parseInt(userInfo.RoleId || userInfo.roleId || 4);
+        return roleId === 3;
+      }
+    } catch { }
+    return false;
+  })();
 
   // Validate ID parameter
   useEffect(() => {
@@ -219,6 +236,26 @@ const BookingPage = () => {
           return;
         }
 
+        // Kiểm tra Host có bị khóa không
+        const hostId = serviceData.HostId || serviceData.hostId;
+        if (hostId) {
+          try {
+            const hostResponse = await axiosInstance.get(`${API_ENDPOINTS.USER}/${hostId}`);
+            const hostData = hostResponse.data;
+            if (hostData.IS_BANNED === true || hostData.IsActive === false) {
+              if (import.meta.env.DEV) {
+                console.warn('🚫 [BookingPage] Host bị khóa, không thể đặt dịch vụ');
+              }
+              setError('Dịch vụ này hiện không khả dụng');
+              setLoading(false);
+              return;
+            }
+          } catch (err) {
+            // Nếu không lấy được thông tin Host, vẫn cho phép tiếp tục
+            console.warn('⚠️ [BookingPage] Không thể kiểm tra trạng thái Host');
+          }
+        }
+
         // Check service status
         // Accept multiple statuses as "available" for booking
         const status = serviceData.Status || serviceData.status || 'open';
@@ -283,6 +320,37 @@ const BookingPage = () => {
 
     fetchService();
   }, [id, navigate]);
+
+  // Fetch thông tin Host khi có service
+  useEffect(() => {
+    const fetchHostInfo = async () => {
+      if (!service) return;
+      
+      const hostId = service.HostId || service.hostId;
+      if (!hostId) return;
+      
+      try {
+        const response = await axiosInstance.get(`${API_ENDPOINTS.USER}/${hostId}`);
+        if (response.data) {
+          const data = response.data;
+          const name = data.FullName || data.fullName || data.Name || data.name || '';
+          setHostName(name);
+          setHostInfo({
+            avatar: data.Avatar || data.avatar || '',
+            fullName: name,
+            businessName: data.BusinessName || data.businessName || name,
+            address: data.Address || data.address || '',
+            phone: data.Phone || data.phone || data.PhoneNumber || data.phoneNumber || '',
+            email: data.Email || data.email || ''
+          });
+        }
+      } catch (err) {
+        console.warn('Không thể tải thông tin Host:', err);
+      }
+    };
+    
+    fetchHostInfo();
+  }, [service]);
 
   // Fetch available services từ ServiceComboDetail (các dịch vụ liên kết với combo)
   useEffect(() => {
@@ -572,7 +640,6 @@ const BookingPage = () => {
       
       const isUserTourist = userRoleId === 4;
       const isUserAgency = userRoleId === 3;
-      const userRoleName = isUserAgency ? 'Đại lý' : 'Du khách';
       
       // Map userTier to level number (bronze=1, silver=2, gold=3)
       const userLevelNum = userTier === 'bronze' ? 1 : userTier === 'silver' ? 2 : userTier === 'gold' ? 3 : 0;
@@ -581,46 +648,6 @@ const BookingPage = () => {
       const userLevelName = levelNames[userLevelNum];
       const userLevelIcon = levelIcons[userLevelNum];
       
-      // Check tourist eligibility
-      if (target.forTourist && target.touristLevels) {
-        const requiredLevels = ['level1', 'level2', 'level3'].filter(l => target.touristLevels[l]);
-        if (requiredLevels.length > 0) {
-          const minRequiredLevel = parseInt(requiredLevels[0].replace('level', ''));
-          const minLevelName = levelNames[minRequiredLevel];
-          const minLevelIcon = levelIcons[minRequiredLevel];
-          
-          if (isUserTourist) {
-            if (userLevelNum >= minRequiredLevel) {
-              return { isEligible: true, reason: '' };
-            }
-            return { 
-              isEligible: false, 
-              reason: `Bạn đang ở hạng ${userLevelIcon} ${userLevelName}. Cần hạng ${minLevelIcon} ${minLevelName} trở lên để sử dụng mã này.`
-            };
-          }
-        }
-      }
-      
-      // Check agency eligibility
-      if (target.forAgency && target.agencyLevels) {
-        const requiredLevels = ['level1', 'level2', 'level3'].filter(l => target.agencyLevels[l]);
-        if (requiredLevels.length > 0) {
-          const minRequiredLevel = parseInt(requiredLevels[0].replace('level', ''));
-          const minLevelName = levelNames[minRequiredLevel];
-          const minLevelIcon = levelIcons[minRequiredLevel];
-          
-          if (isUserAgency) {
-            if (userLevelNum >= minRequiredLevel) {
-              return { isEligible: true, reason: '' };
-            }
-            return { 
-              isEligible: false, 
-              reason: `Bạn đang ở hạng ${userLevelIcon} ${userLevelName}. Cần hạng ${minLevelIcon} ${minLevelName} trở lên để sử dụng mã này.`
-            };
-          }
-        }
-      }
-      
       // Check if coupon is for specific role that user doesn't have
       if (target.forTourist && !target.forAgency && isUserAgency) {
         return { isEligible: false, reason: 'Mã này chỉ dành cho Du khách, không áp dụng cho Đại lý.' };
@@ -628,6 +655,62 @@ const BookingPage = () => {
       
       if (target.forAgency && !target.forTourist && isUserTourist) {
         return { isEligible: false, reason: 'Mã này chỉ dành cho Đại lý, không áp dụng cho Du khách.' };
+      }
+      
+      // Check tourist eligibility
+      if (target.forTourist && isUserTourist) {
+        if (!target.touristLevels) {
+          // Nếu không có touristLevels, cho phép tất cả Tourist
+          return { isEligible: true, reason: '' };
+        }
+        // Nếu level0 = true (Tất cả), cho phép tất cả Tourist
+        if (target.touristLevels.level0) {
+          return { isEligible: true, reason: '' };
+        }
+        const requiredLevels = ['level1', 'level2', 'level3'].filter(l => target.touristLevels[l]);
+        if (requiredLevels.length > 0) {
+          const minRequiredLevel = parseInt(requiredLevels[0].replace('level', ''));
+          const minLevelName = levelNames[minRequiredLevel];
+          const minLevelIcon = levelIcons[minRequiredLevel];
+          
+          if (userLevelNum >= minRequiredLevel) {
+            return { isEligible: true, reason: '' };
+          }
+          return { 
+            isEligible: false, 
+            reason: `Bạn đang ở hạng ${userLevelIcon} ${userLevelName}. Cần hạng ${minLevelIcon} ${minLevelName} trở lên để sử dụng mã này.`
+          };
+        }
+        // Nếu không có level nào được chọn, cho phép
+        return { isEligible: true, reason: '' };
+      }
+      
+      // Check agency eligibility
+      if (target.forAgency && isUserAgency) {
+        if (!target.agencyLevels) {
+          // Nếu không có agencyLevels, cho phép tất cả Agency
+          return { isEligible: true, reason: '' };
+        }
+        // Nếu level0 = true (Tất cả), cho phép tất cả Agency
+        if (target.agencyLevels.level0) {
+          return { isEligible: true, reason: '' };
+        }
+        const requiredLevels = ['level1', 'level2', 'level3'].filter(l => target.agencyLevels[l]);
+        if (requiredLevels.length > 0) {
+          const minRequiredLevel = parseInt(requiredLevels[0].replace('level', ''));
+          const minLevelName = levelNames[minRequiredLevel];
+          const minLevelIcon = levelIcons[minRequiredLevel];
+          
+          if (userLevelNum >= minRequiredLevel) {
+            return { isEligible: true, reason: '' };
+          }
+          return { 
+            isEligible: false, 
+            reason: `Bạn đang ở hạng ${userLevelIcon} ${userLevelName}. Cần hạng ${minLevelIcon} ${minLevelName} trở lên để sử dụng mã này.`
+          };
+        }
+        // Nếu không có level nào được chọn, cho phép
+        return { isEligible: true, reason: '' };
       }
       
       // If no specific target, allow all
@@ -656,23 +739,53 @@ const BookingPage = () => {
       const badges: { level: string; icon: string; name: string }[] = [];
       const parts: string[] = [];
       
+      // Helper: kiểm tra xem có phải chọn tất cả không (level0 = true HOẶC cả 3 level đều được tick)
+      const isAllLevels = (levels: any) => {
+        if (!levels) return false;
+        return levels.level0 || (levels.level1 && levels.level2 && levels.level3);
+      };
+      
+      const touristAll = target.forTourist && isAllLevels(target.touristLevels);
+      const agencyAll = target.forAgency && isAllLevels(target.agencyLevels);
+      
+      // Nếu cả Tourist và Agency đều chọn tất cả -> hiển thị "Tất cả"
+      if (touristAll && agencyAll) {
+        badges.push({ level: 'all', icon: '👥', name: 'Tất cả' });
+        return { text: 'Du khách, Đại lý', badges };
+      }
+      
       if (target.forTourist && target.touristLevels) {
-        const levels = ['level1', 'level2', 'level3'].filter(l => target.touristLevels[l]);
-        levels.forEach(l => badges.push({ level: l, icon: levelIcons[l], name: levelNames[l] }));
-        if (levels.length > 0) {
+        // Nếu chọn tất cả (level0 = true HOẶC cả 3 level), hiển thị badge "Tất cả"
+        if (isAllLevels(target.touristLevels)) {
+          badges.push({ level: 'all-tourist', icon: '👥', name: 'Tất cả' });
           parts.push(`Du khách`);
+        } else {
+          const levels = ['level1', 'level2', 'level3'].filter(l => target.touristLevels[l]);
+          levels.forEach(l => badges.push({ level: l, icon: levelIcons[l], name: levelNames[l] }));
+          if (levels.length > 0) {
+            parts.push(`Du khách`);
+          }
         }
       }
       
       if (target.forAgency && target.agencyLevels) {
-        const levels = ['level1', 'level2', 'level3'].filter(l => target.agencyLevels[l]);
-        levels.forEach(l => {
-          if (!badges.find(b => b.level === l)) {
-            badges.push({ level: l, icon: levelIcons[l], name: levelNames[l] });
+        // Nếu chọn tất cả (level0 = true HOẶC cả 3 level), hiển thị badge "Tất cả"
+        if (isAllLevels(target.agencyLevels)) {
+          // Nếu đã có badge "Tất cả" từ Tourist, không thêm nữa
+          if (!badges.find(b => b.level === 'all-tourist')) {
+            badges.push({ level: 'all-agency', icon: '👥', name: 'Tất cả' });
           }
-        });
-        if (levels.length > 0) {
           parts.push(`Đại lý`);
+        } else {
+          const levels = ['level1', 'level2', 'level3'].filter(l => target.agencyLevels[l]);
+          levels.forEach(l => {
+            if (!badges.find(b => b.level === l)) {
+              badges.push({ level: l, icon: levelIcons[l], name: levelNames[l] });
+            }
+          });
+          if (levels.length > 0) {
+            parts.push(`Đại lý`);
+          }
         }
       }
       
@@ -1137,6 +1250,45 @@ const BookingPage = () => {
         finalEndDate = endDate ? new Date(endDate).toISOString().split('T')[0] : null;
       }
 
+      // Lưu ngày đi vào Notes để Host có thể xem
+      if (finalStartDate) {
+        bookingNotes = bookingNotes + `\n[START_DATE:${finalStartDate}]`;
+      }
+      if (finalEndDate && finalEndDate !== finalStartDate) {
+        bookingNotes = bookingNotes + `\n[END_DATE:${finalEndDate}]`;
+      }
+
+      // Tính và lưu thành tiền (finalAmount) vào Notes để Host có thể xem đúng số tiền
+      // Tính tổng tiền dịch vụ thêm
+      const additionalTotalForNotes = validSelectedServices.reduce((sum, selectedSvc) => {
+        if (availableServices.length === 0) return sum;
+        const availableService = availableServices.find(s => {
+          const svcId = s.Id || s.id;
+          const numId = typeof svcId === 'number' ? svcId : parseInt(svcId);
+          return numId === selectedSvc.id || svcId == selectedSvc.id;
+        });
+        if (availableService) {
+          const price = availableService.Price || availableService.price || 0;
+          return sum + price * selectedSvc.quantity;
+        }
+        return sum;
+      }, 0);
+      
+      const svcPriceForNotes = service?.Price || service?.price || 0;
+      const originalBaseTotalForNotes = svcPriceForNotes * quantity;
+      const totalOriginalForNotes = originalBaseTotalForNotes + additionalTotalForNotes;
+      const totalAfterCouponForNotes = (originalBaseTotalForNotes - couponDiscount) + additionalTotalForNotes;
+      const agencyDiscountForNotes = isAgency ? Math.round(totalOriginalForNotes * 0.03) : 0;
+      const finalAmountForNotes = totalAfterCouponForNotes - agencyDiscountForNotes;
+      
+      // Lưu thành tiền vào Notes
+      bookingNotes = bookingNotes + `\n[FINAL_AMOUNT:${finalAmountForNotes}]`;
+      
+      // Lưu số tiền giảm giá từ coupon vào Notes (để tính tiết kiệm)
+      if (couponDiscount > 0) {
+        bookingNotes = bookingNotes + `\n[COUPON_DISCOUNT:${couponDiscount}]`;
+      }
+
       // Lấy UserId từ storage (backend cần UserId để tạo booking)
       const userId = getUserId();
       if (!userId) {
@@ -1218,7 +1370,99 @@ const BookingPage = () => {
         setValidationError('Đặt dịch vụ thành công nhưng không thể chuyển đến trang thanh toán. Vui lòng thử lại.');
         return;
       }
-      navigate(`/payment/${bookingId}`, { replace: true });
+      
+      // Tính giá gốc để truyền sang PaymentPage (bao gồm cả dịch vụ thêm)
+      const svcPrice = service?.Price || service?.price || 0;
+      const originalBaseTotal = svcPrice * quantity;
+      
+      // Tính tổng tiền dịch vụ thêm
+      const additionalTotal = selectedServices.reduce((sum, selectedSvc) => {
+        if (availableServices.length === 0) return sum;
+        const availableService = availableServices.find(s => {
+          const id = s.Id || s.id;
+          const numId = typeof id === 'number' ? id : parseInt(id);
+          return numId === selectedSvc.id || id == selectedSvc.id;
+        });
+        if (availableService) {
+          const price = availableService.Price || availableService.price || 0;
+          return sum + price * selectedSvc.quantity;
+        }
+        return sum;
+      }, 0);
+      
+      // Tổng tiền gốc = combo + dịch vụ thêm
+      const totalOriginal = originalBaseTotal + additionalTotal;
+      // Tổng tiền sau coupon (coupon chỉ áp dụng cho combo, không áp dụng cho dịch vụ thêm)
+      const totalAfterCoupon = (originalBaseTotal - couponDiscount) + additionalTotal;
+      // Agency discount = 3% của giá gốc (không phải giá sau coupon)
+      const agencyDiscountAmount = isAgency ? Math.round(totalOriginal * 0.03) : 0;
+      // Tổng tiền sau coupon và Agency discount
+      const totalAfterAllDiscounts = totalAfterCoupon - agencyDiscountAmount;
+      
+      // Gửi thông báo đặt dịch vụ thành công
+      const serviceName = service?.Name || service?.name || 'Dịch vụ';
+      const currentUserId = getUserId();
+      if (currentUserId) {
+        // Thêm notification vào local state (hiển thị ngay)
+        addNotification({
+          Id: Date.now(),
+          UserId: currentUserId,
+          Title: '🎉 Đặt dịch vụ thành công',
+          Message: `Bạn đã đặt thành công dịch vụ "${serviceName}". Vui lòng thanh toán để xác nhận đơn hàng.`,
+          IsRead: false,
+          CreatedAt: new Date().toISOString()
+        });
+      }
+      
+      // Gửi thông báo cho Host khi có người đặt dịch vụ
+      const hostId = service?.HostId || service?.hostId;
+      if (hostId && connection) {
+        try {
+          // Lấy tên người đặt
+          const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo');
+          let bookerName = 'Khách hàng';
+          if (userInfoStr) {
+            const userInfo = JSON.parse(userInfoStr);
+            bookerName = userInfo.FullName || userInfo.fullName || userInfo.Name || userInfo.name || 'Khách hàng';
+          }
+          
+          // Gửi notification qua SignalR đến Host
+          await connection.invoke('SendToUser', hostId.toString(), {
+            Id: Date.now() + 1,
+            UserId: hostId,
+            Title: '📦 Có đơn đặt dịch vụ mới',
+            Message: `${bookerName} vừa đặt dịch vụ "${serviceName}" của bạn. Số lượng: ${quantity}.`,
+            IsRead: false,
+            CreatedAt: new Date().toISOString()
+          });
+          
+          if (import.meta.env.DEV) {
+            console.log('✅ [BookingPage] Đã gửi thông báo cho Host:', hostId);
+          }
+        } catch (notifyErr) {
+          // Không block flow nếu gửi notification thất bại
+          console.warn('⚠️ [BookingPage] Không thể gửi thông báo cho Host:', notifyErr);
+        }
+      }
+      
+      // Truyền thông tin coupon và dịch vụ thêm qua state để PaymentPage hiển thị đúng giá
+      navigate(`/payment/${bookingId}`, { 
+        replace: true,
+        state: {
+          coupon: appliedCoupon ? {
+            Code: appliedCoupon.Code,
+            DiscountPercent: appliedCoupon.DiscountPercent,
+            DiscountAmount: appliedCoupon.DiscountAmount
+          } : null,
+          discountAmount: couponDiscount,
+          originalTotal: totalOriginal,
+          finalTotal: totalAfterAllDiscounts,
+          totalBeforeAgencyDiscount: totalAfterCoupon, // Số tiền trước khi giảm Agency (để gửi đến backend)
+          additionalServicesTotal: additionalTotal,
+          isAgency: isAgency,
+          agencyDiscount: agencyDiscountAmount
+        }
+      });
     } catch (err: any) {
       console.error('❌ [BookingPage] Lỗi khi đặt dịch vụ:', err);
       console.error('  - Error message:', err?.message);
@@ -1398,6 +1642,74 @@ const BookingPage = () => {
                           <span>{serviceAddress}</span>
                         </div>
                       )}
+                      {hostName && (
+                        <div className="bk-service-host">
+                          <span className="bk-host-label">Host:</span>
+                          <span 
+                            className="bk-host-name bk-host-clickable"
+                            onClick={() => setShowHostCard(true)}
+                          >
+                            {hostName}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* Host Card Visit Modal */}
+                      {showHostCard && hostInfo && (
+                        <div className="bk-host-card-overlay" onClick={() => setShowHostCard(false)}>
+                          <div className="bk-host-card" onClick={(e) => e.stopPropagation()}>
+                            <button className="bk-host-card-close" onClick={() => setShowHostCard(false)}>×</button>
+                            <div className="bk-host-card-avatar">
+                              {hostInfo.avatar ? (
+                                <img src={getImageUrl(hostInfo.avatar)} alt={hostInfo.fullName} />
+                              ) : (
+                                <div className="bk-host-card-avatar-placeholder">
+                                  {hostInfo.fullName?.charAt(0)?.toUpperCase() || 'H'}
+                                </div>
+                              )}
+                            </div>
+                            <div className="bk-host-card-info">
+                              <h3 className="bk-host-card-name">{hostInfo.businessName || hostInfo.fullName}</h3>
+                              {hostInfo.address && (
+                                <div className="bk-host-card-row">
+                                  <MapPinIcon className="bk-host-card-icon" />
+                                  <span>{hostInfo.address}</span>
+                                </div>
+                              )}
+                              {hostInfo.phone && (
+                                <div className="bk-host-card-row">
+                                  <span className="bk-host-card-icon">📞</span>
+                                  <a href={`tel:${hostInfo.phone}`}>{hostInfo.phone}</a>
+                                </div>
+                              )}
+                              {hostInfo.email && (
+                                <div className="bk-host-card-row">
+                                  <span className="bk-host-card-icon">✉️</span>
+                                  <a href={`mailto:${hostInfo.email}`}>{hostInfo.email}</a>
+                                </div>
+                              )}
+                              <button 
+                                className="bk-host-card-chat-btn"
+                                onClick={() => {
+                                  const hostId = service?.HostId || service?.hostId;
+                                  if (hostId) {
+                                    // Đóng card visit
+                                    setShowHostCard(false);
+                                    // Dispatch event để mở chat popup với Host
+                                    const event = new CustomEvent('openChatWithUser', {
+                                      detail: { userId: hostId }
+                                    });
+                                    window.dispatchEvent(event);
+                                  }
+                                }}
+                              >
+                                💬 Chat với Host
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="bk-service-meta">
                         <div className="bk-service-price-tag">
                           <span className="bk-price-amount">{formatPrice(servicePrice)}</span>
@@ -1883,6 +2195,16 @@ const BookingPage = () => {
                         </span>
                       </div>
                     )}
+
+                    {/* Agency Discount Row - Giảm 3% cho Agency (tính từ giá gốc) */}
+                    {isAgency && (
+                      <div className="bk-summary-row" style={{ marginTop: '0.75rem', color: '#0891b2' }}>
+                        <span className="bk-summary-label">Ưu đãi Agency (-3%)</span>
+                        <span className="bk-summary-value" style={{ color: '#0891b2', fontWeight: '600' }}>
+                          -{formatPrice(Math.round(calculatedTotal * 0.03))}
+                        </span>
+                      </div>
+                    )}
                     
                     <div className="bk-summary-row bk-summary-row-total">
                       <span className="bk-summary-label">Thành tiền</span>
@@ -1890,7 +2212,11 @@ const BookingPage = () => {
                         {calculatingTotal ? (
                           <span className="bk-calculating-text">Đang tính...</span>
                         ) : (
-                          formatPrice(Math.max(0, calculatedTotal - couponDiscount))
+                          formatPrice(Math.max(0, 
+                            isAgency 
+                              ? calculatedTotal - couponDiscount - Math.round(calculatedTotal * 0.03) // Agency giảm 3% từ giá gốc
+                              : calculatedTotal - couponDiscount
+                          ))
                         )}
                       </span>
                     </div>
@@ -2021,5 +2347,5 @@ const BookingPage = () => {
   );
 };
 
-export default BookingPage;
+export default BookingPage; 
 

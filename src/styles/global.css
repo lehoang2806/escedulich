@@ -20,6 +20,97 @@ body {
   background-color: #F8FAFC;
 }
 
+/* GLOBAL: Force remove green accent line from login-card */
+.login-card::before,
+.login-card::after {
+  display: none !important;
+  content: none !important;
+  background: transparent !important;
+  height: 0 !important;
+  width: 0 !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* ============================================
+   GLOBAL ROLE BADGE STYLES
+   Áp dụng cho tất cả các trang trong hệ thống
+   ============================================ */
+
+/* Base role badge style - Kiểu nền xanh nhạt bo góc */
+.role-badge,
+.user-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+/* Role chip style - Kiểu pill nhỏ hơn */
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+/* Tourist role - Xanh lá (giống nút Trang chủ active) */
+.role-badge.tourist,
+.role-badge[data-role="tourist"],
+.role-badge[data-role="user"],
+.user-role-badge.tourist,
+.role-chip.tourist {
+  background-color: rgba(5, 150, 105, 0.1);
+  color: #047857;
+}
+
+/* Host role - Tím */
+.role-badge.host,
+.role-badge[data-role="host"],
+.user-role-badge.host,
+.role-chip.host {
+  background-color: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
+}
+
+/* Agency role - Xanh dương */
+.role-badge.agency,
+.role-badge[data-role="agency"],
+.user-role-badge.agency,
+.role-chip.agency {
+  background-color: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8;
+}
+
+/* Admin role - Cam/Vàng */
+.role-badge.admin,
+.role-badge[data-role="admin"],
+.user-role-badge.admin,
+.role-chip.admin {
+  background-color: rgba(217, 119, 6, 0.1);
+  color: #d97706;
+}
+
+/* Role text inline style (như trong Header) */
+.role-text-inline {
+  font-size: 0.8125rem;
+  color: #047857;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.role-text-inline.tourist { color: #047857; }
+.role-text-inline.host { color: #7c3aed; }
+.role-text-inline.agency { color: #1d4ed8; }
+.role-text-inline.admin { color: #d97706; }
 
 
 
@@ -41,3 +132,158 @@ body {
 
 
 
+
+
+
+/* ============================================
+   GLOBAL TOAST NOTIFICATION STYLES
+   Toast hiển thị ở góc phải màn hình
+   ============================================ */
+
+.notification-toast-container {
+  position: fixed !important;
+  top: 20px !important;
+  right: 20px !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 99999 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+  width: auto;
+  pointer-events: none;
+}
+
+.notification-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border-left: 4px solid #10b981;
+  animation: toast-slide-in 0.3s ease-out;
+  pointer-events: auto;
+  min-width: 300px;
+}
+
+.notification-toast-success {
+  border-left-color: #10b981;
+}
+
+.notification-toast-info {
+  border-left-color: #3b82f6;
+}
+
+.notification-toast-warning {
+  border-left-color: #f59e0b;
+}
+
+.notification-toast-error {
+  border-left-color: #ef4444;
+}
+
+.notification-toast-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  padding: 2px;
+}
+
+.notification-toast-success .notification-toast-icon {
+  color: #10b981;
+  background: #d1fae5;
+}
+
+.notification-toast-info .notification-toast-icon {
+  color: #3b82f6;
+  background: #dbeafe;
+}
+
+.notification-toast-warning .notification-toast-icon {
+  color: #f59e0b;
+  background: #fef3c7;
+}
+
+.notification-toast-error .notification-toast-icon {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+.notification-toast-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.notification-toast-message {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.notification-toast-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: all 0.2s ease;
+}
+
+.notification-toast-close:hover {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive toast */
+@media (max-width: 480px) {
+  .notification-toast-container {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+  
+  .notification-toast {
+    padding: 12px;
+  }
+  
+  .notification-toast-title {
+    font-size: 13px;
+  }
+  
+  .notification-toast-message {
+    font-size: 12px;
+  }
+}

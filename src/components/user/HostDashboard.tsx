@@ -1131,23 +1131,30 @@ const HostDashboard = () => {
               )}
             </div>
 
+            {/* Toast notifications - góc phải màn hình */}
             {error && (
-              <div className="host-alert host-alert-error" role="host-alert">
-                <AlertCircleIcon className="host-alert-icon" />
-                <div className="host-alert-content">
+              <div className="host-toast host-toast-error" role="alert">
+                <AlertCircleIcon className="host-toast-icon" />
+                <div className="host-toast-content">
                   <strong>Lỗi</strong>
                   <p>{error}</p>
                 </div>
+                <button className="host-toast-close" onClick={() => setError(null)} aria-label="Đóng">
+                  <XIcon />
+                </button>
               </div>
             )}
 
             {success && (
-              <div className="host-alert host-alert-success" role="host-alert">
-                <CheckCircleIcon className="host-alert-icon" />
-                <div className="host-alert-content">
+              <div className="host-toast host-toast-success" role="alert">
+                <CheckCircleIcon className="host-toast-icon" />
+                <div className="host-toast-content">
                   <strong>Thành công</strong>
                   <p>{success}</p>
                 </div>
+                <button className="host-toast-close" onClick={() => setSuccess(null)} aria-label="Đóng">
+                  <XIcon />
+                </button>
               </div>
             )}
 

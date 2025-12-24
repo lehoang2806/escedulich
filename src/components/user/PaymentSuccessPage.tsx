@@ -14,6 +14,7 @@ import {
 import { formatPrice } from '~/lib/utils'
 import axiosInstance from '~/utils/axiosInstance'
 import { API_BASE_URL, API_ENDPOINTS } from '~/config/api'
+import { useNotification } from '~/contexts/NotificationContext'
 import './PaymentSuccessPage.css'
 
 interface BookingData {
@@ -34,6 +35,8 @@ interface BookingData {
     name?: string
     Address?: string
     address?: string
+    HostId?: number
+    hostId?: number
   }
   serviceCombo?: {
     Id?: number
@@ -42,6 +45,8 @@ interface BookingData {
     name?: string
     Address?: string
     address?: string
+    HostId?: number
+    hostId?: number
   }
   [key: string]: unknown
 }
@@ -64,6 +69,7 @@ const PaymentSuccessPage = () => {
   const { bookingId } = useParams<{ bookingId: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { addNotification, connection } = useNotification()
   const [booking, setBooking] = useState<BookingData | null>(null)
   const [payment, setPayment] = useState<PaymentData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -71,6 +77,8 @@ const PaymentSuccessPage = () => {
   const [ensuredStatus, setEnsuredStatus] = useState(false)
   const [paymentChecked, setPaymentChecked] = useState(false)
   const [totalSpentUpdated, setTotalSpentUpdated] = useState(false)
+  const [notificationSent, setNotificationSent] = useState(false)
+  const [hostNotificationSent, setHostNotificationSent] = useState(false)
 
   // Trigger Header re-check auth khi page load (sau khi redirect từ PayOS)
   useEffect(() => {
@@ -335,6 +343,117 @@ const PaymentSuccessPage = () => {
     updateUserTotalSpent()
   }, [booking, paymentChecked, totalSpentUpdated])
 
+  // Gửi thông báo thanh toán thành công
+  useEffect(() => {
+    if (!booking || notificationSent) return
+    
+    // Kiểm tra xem đã gửi notification cho booking này chưa
+    const notifiedBookingsKey = 'notifiedPaymentBookings'
+    const notifiedBookings = JSON.parse(sessionStorage.getItem(notifiedBookingsKey) || '[]')
+    const currentBookingId = booking.Id || booking.id
+    
+    if (notifiedBookings.includes(currentBookingId)) {
+      setNotificationSent(true)
+      return
+    }
+    
+    // Lấy userId từ localStorage/sessionStorage
+    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+    if (!userInfoStr) return
+    
+    try {
+      const userInfo = JSON.parse(userInfoStr)
+      const userId = userInfo.Id || userInfo.id
+      if (!userId) return
+      
+      const serviceCombo = booking.ServiceCombo || booking.serviceCombo
+      const serviceName = serviceCombo?.Name || serviceCombo?.name || 'Dịch vụ'
+      const totalAmount = booking.TotalAmount || booking.totalAmount || 0
+      const depositAmount = Math.round(totalAmount * 0.1)
+      
+      // Thêm notification vào local state
+      addNotification({
+        Id: Date.now(),
+        UserId: userId,
+        Title: '✅ Thanh toán thành công',
+        Message: `Bạn đã thanh toán thành công ${formatPrice(depositAmount)} cho dịch vụ "${serviceName}". Đơn hàng của bạn đã được xác nhận.`,
+        IsRead: false,
+        CreatedAt: new Date().toISOString()
+      })
+      
+      // Đánh dấu đã gửi notification cho booking này
+      notifiedBookings.push(currentBookingId)
+      sessionStorage.setItem(notifiedBookingsKey, JSON.stringify(notifiedBookings))
+      setNotificationSent(true)
+    } catch (err) {
+      console.warn('Không thể gửi notification:', err)
+      setNotificationSent(true)
+    }
+  }, [booking, notificationSent, addNotification])
+
+  // Gửi thông báo cho Host khi thanh toán thành công
+  useEffect(() => {
+    const sendHostNotification = async () => {
+      if (!booking || hostNotificationSent || !connection) return
+      
+      // Kiểm tra xem đã gửi notification cho Host về booking này chưa
+      const notifiedHostBookingsKey = 'notifiedHostPaymentBookings'
+      const notifiedHostBookings = JSON.parse(sessionStorage.getItem(notifiedHostBookingsKey) || '[]')
+      const currentBookingId = booking.Id || booking.id
+      
+      if (notifiedHostBookings.includes(currentBookingId)) {
+        setHostNotificationSent(true)
+        return
+      }
+      
+      const serviceCombo = booking.ServiceCombo || booking.serviceCombo
+      // Lấy HostId từ serviceCombo
+      const hostId = serviceCombo?.HostId || serviceCombo?.hostId
+      if (!hostId) {
+        setHostNotificationSent(true)
+        return
+      }
+      
+      // Lấy tên người đặt
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+      let bookerName = 'Khách hàng'
+      if (userInfoStr) {
+        try {
+          const userInfo = JSON.parse(userInfoStr)
+          bookerName = userInfo.FullName || userInfo.fullName || userInfo.Name || userInfo.name || 'Khách hàng'
+        } catch {}
+      }
+      
+      const serviceName = serviceCombo?.Name || serviceCombo?.name || 'Dịch vụ'
+      const totalAmount = booking.TotalAmount || booking.totalAmount || 0
+      const depositAmount = Math.round(totalAmount * 0.1)
+      
+      try {
+        // Gửi notification qua SignalR đến Host
+        await connection.invoke('SendToUser', hostId.toString(), {
+          Id: Date.now() + 2,
+          UserId: hostId,
+          Title: '💰 Có thanh toán mới',
+          Message: `${bookerName} đã thanh toán ${formatPrice(depositAmount)} cho dịch vụ "${serviceName}" của bạn.`,
+          IsRead: false,
+          CreatedAt: new Date().toISOString()
+        })
+        
+        console.log('[PaymentSuccessPage] ✅ Đã gửi thông báo cho Host:', hostId)
+        
+        // Đánh dấu đã gửi notification cho Host về booking này
+        notifiedHostBookings.push(currentBookingId)
+        sessionStorage.setItem(notifiedHostBookingsKey, JSON.stringify(notifiedHostBookings))
+      } catch (err) {
+        console.warn('[PaymentSuccessPage] Không thể gửi notification cho Host:', err)
+      }
+      
+      setHostNotificationSent(true)
+    }
+    
+    sendHostNotification()
+  }, [booking, hostNotificationSent, connection])
+
   if (loading) {
     return (
       <div className="payment-result-page">
@@ -373,7 +492,9 @@ const PaymentSuccessPage = () => {
   const serviceAddress = serviceCombo?.Address || serviceCombo?.address || ''
   const quantity = booking.Quantity || booking.quantity || 0
 
-  const paymentAmount = payment?.Amount ?? payment?.amount ?? totalAmount
+  // Tiền đặt cọc = 10% của số tiền sau khi áp dụng coupon (payment.Amount lưu tổng tiền sau coupon)
+  const amountAfterCoupon = payment?.Amount ?? payment?.amount ?? totalAmount
+  const depositAmount = Math.round(amountAfterCoupon * 0.1)
   const paymentMethod = payment?.PaymentMethod || payment?.paymentMethod || 'PayOS'
   const paymentDate = payment?.CreatedAt || payment?.createdAt || new Date().toISOString()
 
@@ -428,8 +549,8 @@ const PaymentSuccessPage = () => {
 
               {/* Amount Paid */}
               <div className="payment-detail-item">
-                <span className="payment-detail-label">Số tiền đã thanh toán:</span>
-                <span className="payment-detail-value payment-amount">{formatPrice(paymentAmount)}</span>
+                <span className="payment-detail-label">Số tiền đã đặt cọc:</span>
+                <span className="payment-detail-value payment-amount">{formatPrice(depositAmount)}</span>
               </div>
 
               {/* Payment Method */}

@@ -21,8 +21,10 @@ import axiosInstance from '~/utils/axiosInstance'
 import { API_ENDPOINTS } from '~/config/api'
 import './NewsPage.css'
 
+
 // Sử dụng đường dẫn public URL thay vì import
 const defaultNewsImage = '/img/banahills.news-jpg'
+
 
 interface UserInfo {
   Id?: number
@@ -35,6 +37,7 @@ interface UserInfo {
   roleId?: number
   [key: string]: unknown
 }
+
 
 interface NewsItem {
   id: number
@@ -54,6 +57,7 @@ interface NewsItem {
   isLiked: boolean
 }
 
+
 const NewsPage = () => {
   const [isVisible, setIsVisible] = useState(false)
   const [newsList, setNewsList] = useState<NewsItem[]>([])
@@ -66,6 +70,7 @@ const NewsPage = () => {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null)
   const itemsPerPage = 12
 
+
   // Form state
   const [formData, setFormData] = useState({
     title: '',
@@ -76,21 +81,102 @@ const NewsPage = () => {
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+
   useEffect(() => {
     setIsVisible(true)
     window.scrollTo(0, 0)
     document.documentElement.style.scrollBehavior = 'smooth'
 
+
     // Check user role
     checkUserRole()
+
 
     // Fetch news
     fetchNews()
 
+    // Lắng nghe BroadcastChannel để nhận tin tức mới realtime
+    let newsChannel: BroadcastChannel | null = null
+    try {
+      newsChannel = new BroadcastChannel('news-updates')
+      newsChannel.onmessage = (event) => {
+        const { type } = event.data || {}
+        if (type === 'NEWS_CREATED' || type === 'NEWS_DELETED' || type === 'NEWS_LIKED' || type === 'NEWS_UPDATED') {
+          console.log(`Received ${type} broadcast, refreshing...`)
+          fetchNewsQuiet()
+        }
+      }
+    } catch (e) {
+      console.log('BroadcastChannel not supported, using polling fallback')
+    }
+
+    // Fallback: Auto-refresh tin tức mỗi 10 giây
+    const refreshInterval = setInterval(() => {
+      fetchNewsQuiet()
+    }, 10000) // 10 giây
+
     return () => {
       document.documentElement.style.scrollBehavior = 'auto'
+      clearInterval(refreshInterval)
+      if (newsChannel) {
+        newsChannel.close()
+      }
     }
   }, [])
+
+  // Fetch news không hiển thị loading (dùng cho auto-refresh)
+  const fetchNewsQuiet = async () => {
+    try {
+      const response = await axiosInstance.get<any[]>(API_ENDPOINTS.NEWS)
+
+      const transformedNews: NewsItem[] = (response.data || []).map((news: any) => {
+        const rawContent = news.Content || news.content || ''
+        const images = news.Images || news.images || []
+        const firstImage = images.length > 0 ? images[0] : defaultNewsImage
+
+        let title = ''
+        let content = rawContent
+
+        const titleMatch = rawContent.match(/^\[TITLE\](.*?)\[\/TITLE\]\n?(.*)$/s)
+        if (titleMatch) {
+          title = titleMatch[1].trim()
+          content = titleMatch[2].trim()
+        }
+
+        const summary = content.length > 150 ? content.substring(0, 150) + '...' : content
+
+        return {
+          id: news.NewsId || news.newsId || news.id,
+          title: title,
+          content: content,
+          summary: summary,
+          image: firstImage,
+          author: news.AuthorName || news.authorName || news.author || '',
+          authorId: news.AuthorId || news.authorId,
+          authorAvatar: news.AuthorAvatar || news.authorAvatar,
+          authorRole: news.AuthorRole || news.authorRole || '',
+          createdAt: news.CreatedDate || news.createdDate || news.createdAt || '',
+          updatedAt: news.CreatedDate || news.createdDate || news.updatedAt || '',
+          status: 'published',
+          views: 0,
+          likesCount: news.LikesCount || news.likesCount || 0,
+          isLiked: news.IsLiked || news.isLiked || false,
+        }
+      })
+
+      const sortedNews = transformedNews.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0).getTime()
+        const dateB = new Date(b.createdAt || 0).getTime()
+        return dateB - dateA
+      })
+
+      setNewsList(sortedNews)
+    } catch (err) {
+      // Không hiển thị lỗi khi auto-refresh
+      console.error('Error auto-refreshing news:', err)
+    }
+  }
+
 
   const checkUserRole = () => {
     const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
@@ -107,25 +193,36 @@ const NewsPage = () => {
     }
   }
 
+
   const fetchNews = async () => {
     try {
       setLoading(true)
       setError(null)
       const response = await axiosInstance.get<any[]>(API_ENDPOINTS.NEWS)
-      
+     
       // Transform backend NewsDto to frontend NewsItem
-      // Backend returns: NewsId, Content (which is NewsTitle), Images (array), CreatedDate, AuthorName, LikesCount, IsLiked
+      // Backend returns: NewsId, Title, Content, Images (array), CreatedDate, AuthorName, LikesCount, IsLiked
       const transformedNews: NewsItem[] = (response.data || []).map((news: any) => {
-        const content = news.Content || news.content || ''
+        const rawContent = news.Content || news.content || ''
         const images = news.Images || news.images || []
         const firstImage = images.length > 0 ? images[0] : defaultNewsImage
         
-        // Create summary from content (first 200 chars)
-        const summary = content.length > 200 ? content.substring(0, 200) + '...' : content
+        // Tách title từ content nếu có format [TITLE]...[/TITLE]
+        let title = ''
+        let content = rawContent
         
+        const titleMatch = rawContent.match(/^\[TITLE\](.*?)\[\/TITLE\]\n?(.*)$/s)
+        if (titleMatch) {
+          title = titleMatch[1].trim()
+          content = titleMatch[2].trim()
+        }
+       
+        // Create summary from content (first 150 chars)
+        const summary = content.length > 150 ? content.substring(0, 150) + '...' : content
+       
         return {
           id: news.NewsId || news.newsId || news.id,
-          title: content, // Backend Content is actually the title/content
+          title: title,
           content: content,
           summary: summary,
           image: firstImage,
@@ -141,14 +238,14 @@ const NewsPage = () => {
           isLiked: news.IsLiked || news.isLiked || false,
         }
       })
-      
+     
       // Sort by createdAt descending (newest first)
       const sortedNews = transformedNews.sort((a, b) => {
         const dateA = new Date(a.createdAt || 0).getTime()
         const dateB = new Date(b.createdAt || 0).getTime()
         return dateB - dateA
       })
-      
+     
       setNewsList(sortedNews)
     } catch (err: any) {
       console.error('Error fetching news:', err)
@@ -160,10 +257,12 @@ const NewsPage = () => {
     }
   }
 
+
   const handleCreateNews = async (e: React.FormEvent) => {
     e.preventDefault()
     setFormLoading(true)
     setFormError(null)
+
 
     try {
       // Validate form
@@ -173,24 +272,26 @@ const NewsPage = () => {
         return
       }
 
+
       // Backend expects: Content (which becomes NewsTitle), Images (array), SocialMediaLink (optional)
       // Combine title and content for the Content field (backend stores this as NewsTitle)
-      const fullContent = formData.title.trim() 
+      const fullContent = formData.title.trim()
         ? `${formData.title.trim()}\n\n${formData.content.trim()}`
         : formData.content.trim()
-      
-      const images = formData.image.trim() 
+     
+      const images = formData.image.trim()
         ? [formData.image.trim()]
         : [defaultNewsImage]
-      
+     
       const newsData = {
         Content: fullContent,
         Images: images,
         SocialMediaLink: null // Optional field
       }
 
+
       await axiosInstance.post(API_ENDPOINTS.NEWS, newsData)
-      
+     
       // Reset form
       setFormData({
         title: '',
@@ -199,7 +300,7 @@ const NewsPage = () => {
         image: '',
       })
       setShowCreateModal(false)
-      
+     
       // Refresh news list
       await fetchNews()
     } catch (err: any) {
@@ -210,20 +311,32 @@ const NewsPage = () => {
     }
   }
 
+
   const handleDeleteNews = async (id: number) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa tin tức này?')) {
       return
     }
 
+
     try {
       await axiosInstance.delete(`${API_ENDPOINTS.NEWS}/${id}`)
       // Refresh news list
       await fetchNews()
+
+      // Broadcast để các tab khác biết tin tức đã bị xóa
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_DELETED', newsId: id, timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
     } catch (err: any) {
       console.error('Error deleting news:', err)
       alert(err.response?.data?.message || 'Không thể xóa tin tức. Vui lòng thử lại sau.')
     }
   }
+
 
   const handleToggleLike = async (id: number) => {
     if (!userInfo) {
@@ -231,6 +344,7 @@ const NewsPage = () => {
       window.location.href = '/login?returnUrl=/news'
       return
     }
+
 
     try {
       // Optimistic update
@@ -247,9 +361,10 @@ const NewsPage = () => {
         })
       )
 
+
       // Call API
       const response = await axiosInstance.post(`${API_ENDPOINTS.NEWS}/${id}/like`)
-      
+     
       // Update with actual data from server
       const { liked, likesCount } = response.data
       setNewsList((prev) =>
@@ -264,6 +379,15 @@ const NewsPage = () => {
           return news
         })
       )
+
+      // Broadcast để các tab khác biết lượt like đã thay đổi
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_LIKED', newsId: id, likesCount, timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
     } catch (err: any) {
       console.error('Error toggling like:', err)
       // Revert optimistic update
@@ -271,11 +395,13 @@ const NewsPage = () => {
     }
   }
 
+
   // Filter news by search query
   const filteredNews = useMemo(() => {
     if (!searchQuery.trim()) {
       return newsList
     }
+
 
     const query = searchQuery.toLowerCase()
     return newsList.filter(
@@ -286,6 +412,7 @@ const NewsPage = () => {
     )
   }, [newsList, searchQuery])
 
+
   // Pagination
   const totalPages = Math.ceil(filteredNews.length / itemsPerPage)
   const paginatedNews = useMemo(() => {
@@ -293,14 +420,15 @@ const NewsPage = () => {
     return filteredNews.slice(startIndex, startIndex + itemsPerPage)
   }, [filteredNews, currentPage])
 
+
   const formatDate = (dateString: string | undefined | null) => {
     if (!dateString || dateString.trim() === '') {
       return 'Không rõ thời gian'
     }
-    
+   
     try {
       let date: Date
-      
+     
       // Backend trả về format "dd/MM/yyyy HH:mm", cần parse thủ công
       if (dateString.includes('/')) {
         const parts = dateString.split(' ')
@@ -309,7 +437,7 @@ const NewsPage = () => {
           const day = parseInt(dateParts[0], 10)
           const month = parseInt(dateParts[1], 10) - 1
           const year = parseInt(dateParts[2], 10)
-          
+         
           if (parts.length > 1 && parts[1].includes(':')) {
             const timeParts = parts[1].split(':')
             const hours = parseInt(timeParts[0], 10)
@@ -324,11 +452,11 @@ const NewsPage = () => {
       } else {
         date = new Date(dateString)
       }
-      
+     
       if (isNaN(date.getTime())) {
         return 'Không rõ thời gian'
       }
-      
+     
       return date.toLocaleDateString('vi-VN', {
         year: 'numeric',
         month: 'long',
@@ -339,9 +467,11 @@ const NewsPage = () => {
     }
   }
 
+
   return (
     <div className="news-news-page">
       <ConditionalHeader />
+
 
       <main className="news-news-main">
         {/* Page Header */}
@@ -353,6 +483,7 @@ const NewsPage = () => {
             </p>
           </div>
         </section>
+
 
         {/* Main Content */}
         <section className="news-news-content-section">
@@ -375,6 +506,7 @@ const NewsPage = () => {
                 />
               </div>
 
+
               {/* Create Button */}
               {isAdmin && (
                 <Button
@@ -388,6 +520,7 @@ const NewsPage = () => {
                 </Button>
               )}
             </div>
+
 
             {/* News List */}
             {loading ? (
@@ -437,6 +570,7 @@ const NewsPage = () => {
                   ))}
                 </div>
 
+
                 {/* Pagination */}
                 {totalPages > 1 && (
                   <div className="news-news-pagination">
@@ -467,6 +601,7 @@ const NewsPage = () => {
         </section>
       </main>
 
+
       {/* Create News Modal */}
       {showCreateModal && (
         <div className="news-news-modal-overlay" onClick={() => setShowCreateModal(false)}>
@@ -482,12 +617,14 @@ const NewsPage = () => {
               </button>
             </div>
 
+
             <form onSubmit={handleCreateNews} className="news-news-form">
               {formError && (
                 <div className="news-news-form-error" role="alert">
                   {formError}
                 </div>
               )}
+
 
               <div className="news-news-form-group">
                 <label htmlFor="news-news-title" className="news-news-form-label">
@@ -504,6 +641,7 @@ const NewsPage = () => {
                 />
               </div>
 
+
               <div className="news-news-form-group">
                 <label htmlFor="news-news-summary" className="news-news-form-label">
                   Tóm tắt
@@ -517,6 +655,7 @@ const NewsPage = () => {
                   placeholder="Nhập tóm tắt tin tức (tùy chọn)"
                 />
               </div>
+
 
               <div className="news-news-form-group">
                 <label htmlFor="news-news-content" className="news-news-form-label">
@@ -533,6 +672,7 @@ const NewsPage = () => {
                 />
               </div>
 
+
               <div className="news-news-form-group">
                 <label htmlFor="news-news-image" className="news-news-form-label">
                   URL ảnh
@@ -546,6 +686,7 @@ const NewsPage = () => {
                   placeholder="Nhập URL ảnh (tùy chọn)"
                 />
               </div>
+
 
               <div className="news-news-form-actions">
                 <Button
@@ -573,6 +714,7 @@ const NewsPage = () => {
   )
 }
 
+
 // News Card Component
 interface NewsCardProps {
   news: NewsItem
@@ -584,8 +726,20 @@ interface NewsCardProps {
   formatDate: (date: string) => string
 }
 
-const NewsCard: React.FC<NewsCardProps> = ({ news, index, isVisible, isAdmin, onDelete, onToggleLike, formatDate }) => {
+
+const NewsCard: React.FC<NewsCardProps> = ({
+  news,
+  index,
+  isVisible,
+  isAdmin,
+  onDelete,
+  onToggleLike,
+  formatDate
+}) => {
   const newsImage = news.image || defaultNewsImage
+
+  // Chỉ hiển thị title, nội dung xem khi bấm "Đọc thêm"
+  const displayTitle = news.title || 'Tin tức mới'
 
   return (
     <article
@@ -596,7 +750,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ news, index, isVisible, isAdmin, on
         <div className="news-news-image-wrapper">
           <LazyImage
             src={newsImage}
-            alt={news.title}
+            alt={displayTitle}
             className="news-news-image"
             fallbackSrc={defaultNewsImage}
           />
@@ -615,6 +769,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ news, index, isVisible, isAdmin, on
           )}
         </div>
 
+
         <CardContent className="news-news-content">
           <div className="news-news-meta">
             <div className="news-news-meta-item">
@@ -629,7 +784,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ news, index, isVisible, isAdmin, on
             )}
           </div>
 
-          <h3 className="news-news-title">{news.title}</h3>
+          <h3 className="news-news-title">{displayTitle}</h3>
 
           <div className="news-news-footer">
             <div className="news-news-actions">
@@ -662,10 +817,6 @@ const NewsCard: React.FC<NewsCardProps> = ({ news, index, isVisible, isAdmin, on
 }
 
 
+
+
 export default NewsPage
-
-
-
-
-
-

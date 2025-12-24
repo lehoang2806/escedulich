@@ -489,6 +489,7 @@ const CreateServiceComboModal: React.FC<CreateServiceComboModalProps> = ({
             <div className="combo-create-create-service-combo-field">
               <label className="combo-create-create-service-combo-label">
                 Hình ảnh (tối đa 10 ảnh, mỗi ảnh tối đa 5MB)
+                <span className="combo-create-create-service-combo-required-indicator">*</span>
               </label>
               
               {/* Drag & Drop Area */}

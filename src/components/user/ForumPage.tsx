@@ -24,6 +24,7 @@ import { API_ENDPOINTS } from '~/config/api'
 import { getImageUrl } from '~/lib/utils'
 import { getApprovedTime } from '~/api/instances/PostApprovalApi'
 import { getAllApprovalTimesFromFirestore } from '~/services/postApprovalService'
+import { useNotification } from '~/contexts/NotificationContext'
 import './ForumPage.css'
 
 interface UserInfo {
@@ -37,6 +38,8 @@ interface UserInfo {
   avatar?: string
   RoleId?: number
   roleId?: number
+  Role?: string
+  role?: string
   [key: string]: unknown
 }
 
@@ -122,6 +125,7 @@ interface Post {
 
 const ForumPage = () => {
   const navigate = useNavigate()
+  const { connection, isConnected, showToast } = useNotification()
   const [activeTab, setActiveTab] = useState<'featured' | 'forum-saved'>('featured')
   const [posts, setPosts] = useState<Post[]>([])
   const [savedPosts, setSavedPosts] = useState<Post[]>([])
@@ -177,6 +181,9 @@ const ForumPage = () => {
   const [deleteReason, setDeleteReason] = useState('') // Lý do xóa (khi xóa của người khác)
   const [deleteReasonError, setDeleteReasonError] = useState('')
   const [approvalTimesCache, setApprovalTimesCache] = useState<Record<string, string>>({}) // Cache approval times từ Firestore
+  
+  // Ref để track các comment IDs đã bị xóa trong session (tránh hiển thị lại sau polling)
+  const deletedCommentIdsRef = useRef<Set<string>>(new Set())
 
   // Cache key cho posts
   const POSTS_CACHE_KEY = 'forum_posts_cache'
@@ -241,6 +248,37 @@ const ForumPage = () => {
     // } else {
     //   fetchPosts()
     // }
+  }, [])
+
+  // Lắng nghe notification "Bài viết đã được phê duyệt" từ SignalR để real-time update
+  useEffect(() => {
+    if (!connection || !isConnected) return
+
+    const handleReceiveNotification = (notification: { Title?: string; Message?: string }) => {
+      // Kiểm tra nếu là notification về bài viết được phê duyệt
+      if (notification.Title?.includes('phê duyệt') || notification.Message?.includes('phê duyệt')) {
+        console.log('[ForumPage] Received post approval notification, refreshing posts...')
+        // Fetch lại posts để hiển thị bài viết mới được duyệt
+        fetchPosts(false, true) // Background fetch để không hiển thị loading
+      }
+    }
+
+    // Đăng ký listener cho ReceiveNotification
+    connection.on('ReceiveNotification', handleReceiveNotification)
+
+    // Cleanup khi unmount
+    return () => {
+      connection.off('ReceiveNotification', handleReceiveNotification)
+    }
+  }, [connection, isConnected])
+
+  // Polling định kỳ để cập nhật posts mới (mỗi 5 giây)
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      fetchPosts(false, true) // Background fetch
+    }, 5000) // 5 giây
+
+    return () => clearInterval(pollInterval)
   }, [])
 
   useEffect(() => {
@@ -321,18 +359,24 @@ const ForumPage = () => {
 
   // Helper function để build comment tree từ flat list
   const buildCommentTree = (flatComments: PostComment[]): PostComment[] => {
+    // Filter ra các comment đã bị xóa trong session
+    const filteredComments = flatComments.filter(comment => {
+      const id = String(comment.PostCommentId)
+      return !deletedCommentIdsRef.current.has(id)
+    })
+    
     // Tạo map để truy cập nhanh theo ID (string key)
     const commentMap = new Map<string, PostComment>()
     const topLevelComments: PostComment[] = []
 
     // Bước 1: Tạo map với tất cả comments, khởi tạo Replies = []
-    flatComments.forEach((comment) => {
+    filteredComments.forEach((comment) => {
       const id = String(comment.PostCommentId)
       commentMap.set(id, { ...comment, Replies: [] })
     })
 
     // Bước 2: Duyệt lại và gắn reply vào parent
-    flatComments.forEach((comment) => {
+    filteredComments.forEach((comment) => {
       const id = String(comment.PostCommentId)
       const parentId = comment.ParentCommentId
       const currentComment = commentMap.get(id)
@@ -346,16 +390,18 @@ const ForumPage = () => {
         const parentIdStr = String(parentId)
         const parentComment = commentMap.get(parentIdStr)
         
-        if (parentComment) {
+        // Kiểm tra parent có bị xóa không
+        const parentDeleted = deletedCommentIdsRef.current.has(parentIdStr)
+        
+        if (parentComment && !parentDeleted) {
           // Thêm vào replies của parent (tránh duplicate)
           if (!parentComment.Replies.some(r => String(r.PostCommentId) === id)) {
             parentComment.Replies.push(currentComment)
           }
         } else {
-          // Parent không tồn tại (có thể đã bị xóa) -> hiển thị như top-level
-          if (!topLevelComments.some(c => String(c.PostCommentId) === id)) {
-            topLevelComments.push(currentComment)
-          }
+          // Parent không tồn tại hoặc đã bị xóa -> ẨN comment này (orphan)
+          // Không thêm vào topLevelComments để tránh hiển thị comment mồ côi
+          console.log(`[buildCommentTree] Hiding orphan comment ${id} (parent ${parentId} not found or deleted)`)
         }
       } else {
         // Không có parent -> top-level comment
@@ -646,7 +692,77 @@ const ForumPage = () => {
         setUserReactions((prev) => ({ ...prev, ...newUserReactions }))
       }
       
-      setPosts(normalizedPosts)
+      // Nếu là background fetch, merge data thông minh để giữ optimistic updates
+      if (isBackgroundFetch) {
+        setPosts((prevPosts) => {
+          // Tạo map từ server data
+          const serverPostsMap = new Map(normalizedPosts.map(p => [p.PostId, p]))
+          
+          // Merge: giữ lại posts cũ nếu có optimistic updates gần đây
+          // và thêm posts mới từ server
+          const mergedPosts = normalizedPosts.map(serverPost => {
+            const existingPost = prevPosts.find(p => p.PostId === serverPost.PostId)
+            if (!existingPost) return serverPost
+            
+            // Merge comments: ưu tiên server data nhưng giữ lại optimistic comments
+            // (comments có ID là timestamp > 10 digits là optimistic)
+            const mergeComments = (serverComments: PostComment[], localComments: PostComment[]): PostComment[] => {
+              // Filter ra các comments đã bị xóa trong session
+              const filteredServerComments = serverComments.filter(c => 
+                !deletedCommentIdsRef.current.has(c.PostCommentId)
+              )
+              
+              const serverMap = new Map(filteredServerComments.map(c => [c.PostCommentId, c]))
+              const merged: PostComment[] = [...filteredServerComments]
+              
+              // Thêm các optimistic comments chưa có trên server (và chưa bị xóa)
+              localComments.forEach(localComment => {
+                // Skip nếu comment đã bị xóa
+                if (deletedCommentIdsRef.current.has(localComment.PostCommentId)) return
+                
+                const isOptimistic = localComment.PostCommentId.length > 10
+                const existsOnServer = serverMap.has(localComment.PostCommentId)
+                
+                if (isOptimistic && !existsOnServer) {
+                  // Kiểm tra xem có comment tương tự trên server không (cùng content, cùng author)
+                  const similarOnServer = serverComments.find(sc => 
+                    sc.Content === localComment.Content && 
+                    String(sc.AuthorId) === String(localComment.AuthorId)
+                  )
+                  if (!similarOnServer) {
+                    merged.push(localComment)
+                  }
+                }
+                
+                // Merge replies recursively
+                if (existsOnServer) {
+                  const serverComment = serverMap.get(localComment.PostCommentId)!
+                  const idx = merged.findIndex(c => c.PostCommentId === localComment.PostCommentId)
+                  if (idx !== -1) {
+                    merged[idx] = {
+                      ...serverComment,
+                      Replies: mergeComments(serverComment.Replies || [], localComment.Replies || [])
+                    }
+                  }
+                }
+              })
+              
+              return merged
+            }
+            
+            return {
+              ...serverPost,
+              Comments: mergeComments(serverPost.Comments || [], existingPost.Comments || []),
+              // Giữ lại optimistic likes nếu có
+              Likes: serverPost.Likes || existingPost.Likes,
+            }
+          })
+          
+          return mergedPosts
+        })
+      } else {
+        setPosts(normalizedPosts)
+      }
       
       // Save to cache
       saveCachedPosts(approvedPosts)
@@ -1191,6 +1307,36 @@ const ForumPage = () => {
           console.error('Lỗi xóa ảnh trên Firebase:', err)
         }
       }
+      
+      // Update local state thay vì fetch lại toàn bộ
+      const postId = editingPost.PostId || String(editingPost.Id || '')
+      setPosts(prevPosts => prevPosts.map(post => {
+        if ((post.PostId || String(post.Id || '')) === postId) {
+          return {
+            ...post,
+            PostContent: postData.PostContent,
+            ArticleTitle: postData.ArticleTitle || '',
+            Images: finalImages,
+          }
+        }
+        return post
+      }))
+      
+      // Cập nhật savedPosts nếu đang ở tab saved
+      if (activeTab === 'forum-saved') {
+        setSavedPosts(prevPosts => prevPosts.map(post => {
+          if ((post.PostId || String(post.Id || '')) === postId) {
+            return {
+              ...post,
+              PostContent: postData.PostContent,
+              ArticleTitle: postData.ArticleTitle || '',
+              Images: finalImages,
+            }
+          }
+          return post
+        }))
+      }
+      
       // Reset form
       setCreatePostData({
         ArticleTitle: '',
@@ -1206,11 +1352,8 @@ const ForumPage = () => {
         fileInputRef.current.value = ''
       }
       
-      // Refresh posts
-      await fetchPosts()
-      if (activeTab === 'forum-saved') {
-        await fetchSavedPosts()
-      }
+      // Hiển thị toast thông báo thành công
+      showToast('Cập nhật bài viết thành công!', '', 'success')
     } catch (err: any) {
       console.error('Error updating post:', err)
       setFormErrors({ submit: err.response?.data?.message || 'Không thể cập nhật bài viết. Vui lòng thử lại.' })
@@ -1556,6 +1699,46 @@ const ForumPage = () => {
       return newInputs
     })
 
+    // Tạo comment mới với temporary ID để hiển thị ngay
+    const userName = userInfo.Name || userInfo.name || 'Bạn'
+    const userId = userInfo.Id || userInfo.id
+    const tempCommentId = String(Date.now())
+    const newComment: PostComment = {
+      PostCommentId: tempCommentId,
+      FullName: userName,
+      Avatar: userInfo?.Avatar || userInfo?.avatar || '',
+      Content: commentText,
+      CreatedDate: new Date().toISOString(),
+      Likes: [],
+      Replies: [],
+      AuthorId: userId,
+    }
+
+    // Optimistic update: thêm comment vào đầu danh sách ngay lập tức
+    setPosts((prev) =>
+      prev.map((post) => {
+        if (post.PostId === postId) {
+          return {
+            ...post,
+            Comments: [newComment, ...(post.Comments || [])],
+          }
+        }
+        return post
+      })
+    )
+    
+    setSavedPosts((prev) =>
+      prev.map((post) => {
+        if (post.PostId === postId) {
+          return {
+            ...post,
+            Comments: [newComment, ...(post.Comments || [])],
+          }
+        }
+        return post
+      })
+    )
+
     try {
       setSubmittingComment(postId)
       const response = await axiosInstance.post(API_ENDPOINTS.COMMENT, {
@@ -1564,63 +1747,54 @@ const ForumPage = () => {
         Images: null, // Không có ảnh trong comment input hiện tại
       })
       
-      // Lấy ID thực từ response (backend trả về comment vừa tạo)
-      const realCommentId = response.data?.id?.toString() || response.data?.Id?.toString() || String(Date.now())
+      // Cập nhật ID thực từ server (thay thế temporary ID)
+      const realCommentId = response.data?.id?.toString() || response.data?.Id?.toString() || tempCommentId
       
-      // Optimistic update với ID thực từ server
-      const userName = userInfo.Name || userInfo.name || 'Bạn'
-      const userId = userInfo.Id || userInfo.id
+      if (realCommentId !== tempCommentId) {
+        // Cập nhật ID thực trong state
+        const updateCommentId = (postsList: Post[]): Post[] => {
+          return postsList.map((post) => {
+            if (post.PostId === postId) {
+              return {
+                ...post,
+                Comments: (post.Comments || []).map((c) =>
+                  c.PostCommentId === tempCommentId ? { ...c, PostCommentId: realCommentId } : c
+                ),
+              }
+            }
+            return post
+          })
+        }
+        setPosts(updateCommentId)
+        setSavedPosts(updateCommentId)
+      }
+    } catch (err: any) {
+      console.error('Error commenting:', err)
+      // Revert optimistic update on error
       setPosts((prev) =>
         prev.map((post) => {
           if (post.PostId === postId) {
-            const newComment: PostComment = {
-              PostCommentId: realCommentId,
-              FullName: userName,
-              Avatar: userInfo?.Avatar || userInfo?.avatar || '',
-              Content: commentText,
-              CreatedDate: new Date().toISOString(),
-              Likes: [],
-              Replies: [],
-              AuthorId: userId,
-            }
             return {
               ...post,
-              Comments: [...(post.Comments || []), newComment],
+              Comments: (post.Comments || []).filter((c) => c.PostCommentId !== tempCommentId),
             }
           }
           return post
         })
       )
-      
-      // Cập nhật savedPosts nếu cần
       setSavedPosts((prev) =>
         prev.map((post) => {
           if (post.PostId === postId) {
-            const newComment: PostComment = {
-              PostCommentId: realCommentId,
-              FullName: userName,
-              Avatar: userInfo?.Avatar || userInfo?.avatar || '',
-              Content: commentText,
-              CreatedDate: new Date().toISOString(),
-              Likes: [],
-              Replies: [],
-              AuthorId: userId,
-            }
             return {
               ...post,
-              Comments: [...(post.Comments || []), newComment],
+              Comments: (post.Comments || []).filter((c) => c.PostCommentId !== tempCommentId),
             }
           }
           return post
         })
       )
-      
-      // Fetch lại ở background để sync cache với server (fix comment biến mất sau F5)
-      fetchPosts(true, true)
-    } catch (err: any) {
-      console.error('Error commenting:', err)
-      // Chỉ refresh khi có lỗi để đảm bảo đồng bộ
-      await fetchPosts(true)
+      // Hiển thị lỗi
+      showToast('Không thể gửi bình luận', err.response?.data?.message || 'Vui lòng thử lại', 'error')
     } finally {
       setSubmittingComment(null)
     }
@@ -1699,16 +1873,13 @@ const ForumPage = () => {
         Images: null,
       })
 
-      // Sync với server ở background sau 500ms
-      setTimeout(() => {
-        fetchPosts(true, true)
-      }, 500)
+      // Không fetch lại ngay - optimistic update đã đủ
     } catch (err: any) {
       console.error('Error updating comment:', err)
       // Revert về state cũ nếu có lỗi
       setPosts(previousPosts)
       setSavedPosts(previousSavedPosts)
-      alert(err.response?.data?.message || 'Không thể cập nhật bình luận. Vui lòng thử lại.')
+      showToast('Không thể cập nhật bình luận', err.response?.data?.message || 'Vui lòng thử lại', 'error')
     }
   }
 
@@ -1742,45 +1913,48 @@ const ForumPage = () => {
     const previousPosts = posts
     const previousSavedPosts = savedPosts
 
+    // Tìm comment và tất cả replies của nó để xóa (đặt ngoài try để access trong catch)
+    const findCommentAndReplies = (comments: PostComment[], targetId: string): string[] => {
+      const ids: string[] = []
+      for (const comment of comments) {
+        if (comment.PostCommentId === targetId) {
+          // Tìm thấy comment cần xóa, thu thập tất cả reply IDs (đệ quy)
+          const collectReplyIds = (c: PostComment): string[] => {
+            const replyIds: string[] = []
+            if (c.Replies && c.Replies.length > 0) {
+              for (const reply of c.Replies) {
+                replyIds.push(reply.PostCommentId)
+                replyIds.push(...collectReplyIds(reply))
+              }
+            }
+            return replyIds
+          }
+          ids.push(targetId, ...collectReplyIds(comment))
+          return ids
+        }
+        // Tìm trong replies
+        if (comment.Replies && comment.Replies.length > 0) {
+          const found = findCommentAndReplies(comment.Replies, targetId)
+          if (found.length > 0) return found
+        }
+      }
+      return ids
+    }
+
+    // Tìm post và lấy tất cả IDs cần xóa
+    const currentPost = posts.find(p => p.PostId === postId)
+    const idsToDelete = currentPost?.Comments 
+      ? findCommentAndReplies(currentPost.Comments, commentId)
+      : [commentId]
+
+    // Thêm các IDs vào deletedCommentIdsRef để tránh hiển thị lại sau polling
+    idsToDelete.forEach(id => deletedCommentIdsRef.current.add(id))
+
     try {
       setDeletingComment(commentId)
       setDeleteCommentConfirm(null) // Đóng modal ngay
       setDeleteReason('')
       setDeleteReasonError('')
-
-      // Tìm comment và tất cả replies của nó để xóa
-      const findCommentAndReplies = (comments: PostComment[], targetId: string): string[] => {
-        const ids: string[] = []
-        for (const comment of comments) {
-          if (comment.PostCommentId === targetId) {
-            // Tìm thấy comment cần xóa, thu thập tất cả reply IDs (đệ quy)
-            const collectReplyIds = (c: PostComment): string[] => {
-              const replyIds: string[] = []
-              if (c.Replies && c.Replies.length > 0) {
-                for (const reply of c.Replies) {
-                  replyIds.push(reply.PostCommentId)
-                  replyIds.push(...collectReplyIds(reply))
-                }
-              }
-              return replyIds
-            }
-            ids.push(targetId, ...collectReplyIds(comment))
-            return ids
-          }
-          // Tìm trong replies
-          if (comment.Replies && comment.Replies.length > 0) {
-            const found = findCommentAndReplies(comment.Replies, targetId)
-            if (found.length > 0) return found
-          }
-        }
-        return ids
-      }
-
-      // Tìm post và lấy tất cả IDs cần xóa
-      const currentPost = posts.find(p => p.PostId === postId)
-      const idsToDelete = currentPost?.Comments 
-        ? findCommentAndReplies(currentPost.Comments, commentId)
-        : [commentId]
 
       // Optimistic update: xóa comment và replies khỏi UI ngay lập tức
       const removeCommentFromList = (postsList: Post[]): Post[] => {
@@ -1819,16 +1993,16 @@ const ForumPage = () => {
         }
       }
 
-      // Sync với server ở background
-      setTimeout(() => {
-        fetchPosts(true, true)
-      }, 500)
+      // Không fetch lại ngay - optimistic update đã đủ
+      showToast('Đã xóa bình luận', '', 'success')
     } catch (err: any) {
       console.error('Error deleting comment:', err)
       // Revert về state cũ nếu có lỗi
       setPosts(previousPosts)
       setSavedPosts(previousSavedPosts)
-      alert(err.response?.data?.message || 'Không thể xóa bình luận. Vui lòng thử lại.')
+      // Xóa các IDs khỏi deletedCommentIdsRef vì xóa thất bại
+      idsToDelete.forEach(id => deletedCommentIdsRef.current.delete(id))
+      showToast('Không thể xóa bình luận', err.response?.data?.message || 'Vui lòng thử lại', 'error')
     } finally {
       setDeletingComment(null)
     }
@@ -1848,7 +2022,7 @@ const ForumPage = () => {
     // Nếu là temporary ID, cần fetch lại để lấy ID thực từ server
     const isTemporaryId = parentCommentId.length > 10
     if (isTemporaryId) {
-      alert('Vui lòng đợi bình luận được lưu xong trước khi trả lời.')
+      showToast('Vui lòng đợi', 'Bình luận đang được lưu, vui lòng thử lại sau', 'warning')
       return
     }
 
@@ -1941,7 +2115,7 @@ const ForumPage = () => {
       }
     } catch (err: any) {
       console.error('Error replying to comment:', err)
-      alert(err.response?.data?.message || 'Không thể gửi phản hồi. Vui lòng thử lại.')
+      showToast('Không thể gửi phản hồi', err.response?.data?.message || 'Vui lòng thử lại', 'error')
     } finally {
       setSubmittingReply(null)
     }
@@ -2121,7 +2295,7 @@ const ForumPage = () => {
       
       // Backend trả về format "dd/MM/yyyy HH:mm" hoặc ISO format
       if (effectiveDate.includes('/')) {
-        // Format "dd/MM/yyyy HH:mm" - backend lưu local time (Vietnam UTC+7)
+        // Format "dd/MM/yyyy HH:mm" - backend lưu UTC time
         const parts = effectiveDate.split(' ')
         const dateParts = parts[0].split('/')
         if (dateParts.length === 3) {
@@ -2133,10 +2307,10 @@ const ForumPage = () => {
             const timeParts = parts[1].split(':')
             const hours = parseInt(timeParts[0], 10)
             const minutes = parseInt(timeParts[1], 10)
-            // Tạo date với local time vì backend lưu local time (DateTime.Now)
-            date = new Date(year, month, day, hours, minutes)
+            // Backend lưu UTC time, tạo date với UTC
+            date = new Date(Date.UTC(year, month, day, hours, minutes))
           } else {
-            date = new Date(year, month, day)
+            date = new Date(Date.UTC(year, month, day))
           }
         } else {
           date = new Date(effectiveDate)
@@ -2144,9 +2318,7 @@ const ForumPage = () => {
       } else {
         // ISO format - backend có thể trả về ISO format
         // Nếu không có timezone indicator ('Z' hoặc '+'), thêm 'Z' để parse như UTC
-        // vì backend C# DateTime.Now.ToString() không có timezone
         if (!effectiveDate.endsWith('Z') && !effectiveDate.includes('+') && !effectiveDate.includes('-', 10)) {
-          // Không có timezone indicator -> coi như UTC và convert sang local
           date = new Date(effectiveDate + 'Z')
         } else {
           date = new Date(effectiveDate)
@@ -2171,10 +2343,14 @@ const ForumPage = () => {
       if (diffHours < 24) return `${diffHours} giờ trước`
       if (diffDays < 7) return `${diffDays} ngày trước`
       
-      return date.toLocaleDateString('vi-VN', {
+      // Hiển thị ngày tháng năm và giờ phút theo GMT+7
+      return date.toLocaleString('vi-VN', {
         year: 'numeric',
-        month: 'long',
-        day: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Ho_Chi_Minh',
       })
     } catch {
       return 'Không rõ thời gian'
@@ -3316,7 +3492,22 @@ const PostCard: React.FC<PostCardProps> = ({
                 const renderComment = (comment: PostComment, depth: number = 0): React.ReactNode => {
                   const commentKey = `${post.PostId}-${comment.PostCommentId}`
                   const isEditing = editingCommentId === comment.PostCommentId
-                  const isCommentAuthor = userInfo && comment.AuthorId && (comment.AuthorId === userInfo.Id || comment.AuthorId === userInfo.id)
+                  // So sánh cả number và string để đảm bảo khớp
+                  const currentUserId = userInfo?.Id || userInfo?.id
+                  const commentAuthorId = comment.AuthorId
+                  const isCommentAuthor = userInfo && commentAuthorId && currentUserId && (
+                    commentAuthorId === currentUserId || 
+                    String(commentAuthorId) === String(currentUserId)
+                  )
+                  // Kiểm tra quyền xóa: Admin, chủ comment, hoặc chủ bài viết
+                  const isAdmin = userInfo?.Role === 'Admin' || userInfo?.role === 'Admin' || userInfo?.RoleId === 1 || userInfo?.roleId === 1
+                  const postAuthorId = post.PosterId || post.AuthorId
+                  // So sánh cả number và string để đảm bảo khớp
+                  const isPostOwner = userInfo && postAuthorId && currentUserId && (
+                    postAuthorId === currentUserId || 
+                    String(postAuthorId) === String(currentUserId)
+                  )
+                  const canDeleteThisComment = isCommentAuthor || isAdmin || isPostOwner
                   const isReplyOpen = showReplyInputs.has(commentKey)
                   const reactionCount = comment.ReactionsCount || comment.Likes?.length || 0
                   
@@ -3350,7 +3541,7 @@ const PostCard: React.FC<PostCardProps> = ({
                         <div className="forum-forum-comment-content">
                           <div className="forum-forum-comment-header">
                             <span className="forum-forum-comment-author">{comment.FullName}</span>
-                            {isCommentAuthor && setShowCommentMenu && (
+                            {canDeleteThisComment && setShowCommentMenu && (
                               <div className="forum-forum-comment-menu-wrapper">
                                 <button
                                   className="forum-forum-comment-menu-btn"
@@ -3368,24 +3559,28 @@ const PostCard: React.FC<PostCardProps> = ({
                                 </button>
                                 {showCommentMenu[commentKey] && (
                                   <div className="forum-forum-comment-menu">
-                                    <button
-                                      className="forum-forum-comment-menu-item"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        if (onEditComment && comment.Content) {
-                                          onEditComment(comment.PostCommentId, comment.Content)
-                                          setShowCommentMenu((prev) => {
-                                            const newState = { ...prev }
-                                            delete newState[commentKey]
-                                            return newState
-                                          })
-                                        }
-                                      }}
-                                      disabled={deletingComment === comment.PostCommentId}
-                                    >
-                                      <EditIcon className="forum-forum-comment-menu-item-icon" />
-                                      <span>Chỉnh sửa</span>
-                                    </button>
+                                    {/* Chỉ chủ comment mới được chỉnh sửa */}
+                                    {isCommentAuthor && (
+                                      <button
+                                        className="forum-forum-comment-menu-item"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          if (onEditComment && comment.Content) {
+                                            onEditComment(comment.PostCommentId, comment.Content)
+                                            setShowCommentMenu((prev) => {
+                                              const newState = { ...prev }
+                                              delete newState[commentKey]
+                                              return newState
+                                            })
+                                          }
+                                        }}
+                                        disabled={deletingComment === comment.PostCommentId}
+                                      >
+                                        <EditIcon className="forum-forum-comment-menu-item-icon" />
+                                        <span>Chỉnh sửa</span>
+                                      </button>
+                                    )}
+                                    {/* Admin, chủ comment, chủ bài viết đều có thể xóa */}
                                     <button
                                       className="forum-forum-comment-menu-item forum-forum-comment-menu-item-danger"
                                       onClick={(e) => {

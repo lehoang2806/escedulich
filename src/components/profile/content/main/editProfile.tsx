@@ -91,17 +91,17 @@ const CameraOverlay = styled(Box)(() => ({
   width: 40,
   height: 40,
   borderRadius: '50%',
-  backgroundColor: 'primary.main',
+  backgroundColor: '#0f766e',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   cursor: 'pointer',
   border: '3px solid white',
-  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.2)',
+  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
   transition: 'all 0.3s ease',
-  opacity: 0.9,
+  opacity: 1,
   '&:hover': {
-    backgroundColor: 'primary.dark',
+    backgroundColor: '#0d6560',
     transform: 'scale(1.1)'
   }
 }))
@@ -465,7 +465,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   color: 'text.secondary',
                   cursor: 'pointer',
                   '&:hover': {
-                    color: 'primary.main'
+                    color: '#0f766e'
                   }
                 }}
                 onClick={handleAvatarClick}
@@ -477,7 +477,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
             {/* Thông tin cá nhân */}
             <Box>
               <Box className="flex items-center gap-[1.2rem] mb-[2rem]">
-                <PersonIcon sx={{ color: 'primary.main', fontSize: '2rem' }} />
+                <PersonIcon sx={{ color: '#0f766e', fontSize: '2rem' }} />
                 <Typography
                   sx={{
                     fontSize: '1.5rem',
@@ -497,7 +497,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                      <PersonIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                     </InputAdornment>
                   )
                 }}
@@ -513,17 +513,22 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       fontSize: '1.4rem',
                       lineHeight: 1.6
                     },
+                    '& fieldset': {
+                      borderColor: '#94a3b8',
+                      borderWidth: '1.5px'
+                    },
                     '&:hover fieldset': {
-                      borderColor: 'primary.main'
+                      borderColor: '#0f766e'
                     },
                     '&.Mui-focused fieldset': {
-                      borderColor: 'primary.main',
+                      borderColor: '#0f766e',
                       borderWidth: 2
                     }
                   },
                   '& .MuiInputLabel-root': {
                     fontSize: '1.4rem',
                     lineHeight: 1.6,
+                    color: '#64748b',
                     transform: 'translate(14px, 16px) scale(1)',
                     '&.MuiInputLabel-shrink': {
                       transform: 'translate(14px, -9px) scale(0.75)',
@@ -532,7 +537,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     }
                   },
                   '& .MuiInputLabel-root.Mui-focused': {
-                    color: 'primary.main'
+                    color: '#0f766e'
                   }
                 }}
               />
@@ -544,12 +549,12 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <EmailIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                      <EmailIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                     </InputAdornment>
                   )
                 }}
                 sx={{
-                  bgcolor: 'grey.100',
+                  bgcolor: '#f1f5f9',
                   mb: 3,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '1.2rem',
@@ -560,12 +565,14 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       lineHeight: 1.6
                     },
                     '& fieldset': {
-                      borderColor: 'grey.300'
+                      borderColor: '#94a3b8',
+                      borderWidth: '1.5px'
                     }
                   },
                   '& .MuiInputLabel-root': {
                     fontSize: '1.4rem',
                     lineHeight: 1.6,
+                    color: '#64748b',
                     transform: 'translate(14px, 16px) scale(1)',
                     '&.MuiInputLabel-shrink': {
                       transform: 'translate(14px, -9px) scale(0.75)',
@@ -591,7 +598,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <PhoneIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                        <PhoneIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                       </InputAdornment>
                     )
                   }}
@@ -605,11 +612,15 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                         fontSize: '1.4rem',
                         lineHeight: 1.6
                       },
+                      '& fieldset': {
+                        borderColor: '#94a3b8',
+                        borderWidth: '1.5px'
+                      },
                       '&:hover fieldset': {
-                        borderColor: 'primary.main'
+                        borderColor: '#0f766e'
                       },
                       '&.Mui-focused fieldset': {
-                        borderColor: 'primary.main',
+                        borderColor: '#0f766e',
                         borderWidth: 2
                       }
                     },
@@ -624,7 +635,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
-                      color: 'primary.main'
+                      color: '#0f766e'
                     }
                   }}
                 />
@@ -637,7 +648,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <WcIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                        <WcIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                       </InputAdornment>
                     )
                   }}
@@ -652,10 +663,10 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                         lineHeight: 1.6
                       },
                       '&:hover fieldset': {
-                        borderColor: 'primary.main'
+                        borderColor: '#0f766e'
                       },
                       '&.Mui-focused fieldset': {
-                        borderColor: 'primary.main',
+                        borderColor: '#0f766e',
                         borderWidth: 2
                       }
                     },
@@ -670,7 +681,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
-                      color: 'primary.main'
+                      color: '#0f766e'
                     }
                   }}
                 >
@@ -697,7 +708,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1.5 }}>
-                        <HomeIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                        <HomeIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                       </InputAdornment>
                     )
                   }}
@@ -713,10 +724,10 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                         lineHeight: 1.6
                       },
                       '&:hover fieldset': {
-                        borderColor: 'primary.main'
+                        borderColor: '#0f766e'
                       },
                       '&.Mui-focused fieldset': {
-                        borderColor: 'primary.main',
+                        borderColor: '#0f766e',
                         borderWidth: 2
                       }
                     },
@@ -731,7 +742,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       }
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
-                      color: 'primary.main'
+                      color: '#0f766e'
                     }
                   }}
                 />
@@ -750,7 +761,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <CalendarTodayIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                        <CalendarTodayIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                       </InputAdornment>
                     )
                   }}
@@ -765,10 +776,10 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                         lineHeight: 1.6
                       },
                       '&:hover fieldset': {
-                        borderColor: 'primary.main'
+                        borderColor: '#0f766e'
                       },
                       '&.Mui-focused fieldset': {
-                        borderColor: 'primary.main',
+                        borderColor: '#0f766e',
                         borderWidth: 2
                       }
                     },
@@ -780,7 +791,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       padding: '0 8px'
                     },
                     '& .MuiInputLabel-root.Mui-focused': {
-                      color: 'primary.main'
+                      color: '#0f766e'
                     }
                   }}
                 />
@@ -790,7 +801,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
             {/* Đổi mật khẩu */}
             <Box>
               <Box className="flex items-center gap-[1.2rem] mb-[2rem]">
-                <LockIcon sx={{ color: 'primary.main', fontSize: '2rem' }} />
+                <LockIcon sx={{ color: '#0f766e', fontSize: '2rem' }} />
                 <Typography
                   sx={{
                     fontSize: '1.5rem',
@@ -815,11 +826,11 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   />
                 }
                 label={<Typography sx={{ fontSize: '1.4rem' }}>Tôi muốn đổi mật khẩu</Typography>}
-                sx={{ mb: showPasswordFields ? 2 : 0 }}
+                sx={{ mb: showPasswordFields ? 3 : 0 }}
               />
 
               {showPasswordFields && (
-                <Box className="space-y-[2rem]">
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <TextField
                     fullWidth
                     label="Mật khẩu hiện tại"
@@ -829,7 +840,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          <LockIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                          <LockIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                         </InputAdornment>
                       ),
                       endAdornment: (
@@ -837,7 +848,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                           <IconButton
                             onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                             edge="end"
-                            sx={{ color: 'grey.400' }}
+                            sx={{ color: '#64748b' }}
                           >
                             {showCurrentPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
                           </IconButton>
@@ -848,26 +859,31 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       bgcolor: 'white',
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '1.2rem',
-                        py: 0.5,
+                        '& fieldset': {
+                          borderColor: '#94a3b8',
+                          borderWidth: '1.5px'
+                        },
                         '& .MuiInputBase-input': {
-                          py: 1.5,
+                          py: 1.8,
+                          px: 1,
                           fontSize: '1.4rem',
                           lineHeight: 1.6
                         },
                         '&:hover fieldset': {
-                          borderColor: 'primary.main'
+                          borderColor: '#0f766e'
                         },
                         '&.Mui-focused fieldset': {
-                          borderColor: 'primary.main',
+                          borderColor: '#0f766e',
                           borderWidth: 2
                         }
                       },
                       '& .MuiInputLabel-root': {
                         fontSize: '1.4rem',
-                        lineHeight: 1.6
+                        lineHeight: 1.6,
+                        color: '#64748b'
                       },
                       '& .MuiInputLabel-root.Mui-focused': {
-                        color: 'primary.main'
+                        color: '#0f766e'
                       }
                     }}
                   />
@@ -880,7 +896,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          <LockIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                          <LockIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                         </InputAdornment>
                       ),
                       endAdornment: (
@@ -888,7 +904,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                           <IconButton
                             onClick={() => setShowNewPassword(!showNewPassword)}
                             edge="end"
-                            sx={{ color: 'grey.400' }}
+                            sx={{ color: '#64748b' }}
                           >
                             {showNewPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
                           </IconButton>
@@ -899,26 +915,31 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       bgcolor: 'white',
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '1.2rem',
-                        py: 0.5,
+                        '& fieldset': {
+                          borderColor: '#94a3b8',
+                          borderWidth: '1.5px'
+                        },
                         '& .MuiInputBase-input': {
-                          py: 1.5,
+                          py: 1.8,
+                          px: 1,
                           fontSize: '1.4rem',
                           lineHeight: 1.6
                         },
                         '&:hover fieldset': {
-                          borderColor: 'primary.main'
+                          borderColor: '#0f766e'
                         },
                         '&.Mui-focused fieldset': {
-                          borderColor: 'primary.main',
+                          borderColor: '#0f766e',
                           borderWidth: 2
                         }
                       },
                       '& .MuiInputLabel-root': {
                         fontSize: '1.4rem',
-                        lineHeight: 1.6
+                        lineHeight: 1.6,
+                        color: '#64748b'
                       },
                       '& .MuiInputLabel-root.Mui-focused': {
-                        color: 'primary.main'
+                        color: '#0f766e'
                       }
                     }}
                   />
@@ -931,7 +952,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          <LockIcon sx={{ color: 'grey.400', fontSize: '2rem' }} />
+                          <LockIcon sx={{ color: '#64748b', fontSize: '2rem' }} />
                         </InputAdornment>
                       ),
                       endAdornment: (
@@ -939,7 +960,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                           <IconButton
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                             edge="end"
-                            sx={{ color: 'grey.400' }}
+                            sx={{ color: '#64748b' }}
                           >
                             {showConfirmPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
                           </IconButton>
@@ -950,26 +971,31 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                       bgcolor: 'white',
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '1.2rem',
-                        py: 0.5,
+                        '& fieldset': {
+                          borderColor: '#94a3b8',
+                          borderWidth: '1.5px'
+                        },
                         '& .MuiInputBase-input': {
-                          py: 1.5,
+                          py: 1.8,
+                          px: 1,
                           fontSize: '1.4rem',
                           lineHeight: 1.6
                         },
                         '&:hover fieldset': {
-                          borderColor: 'primary.main'
+                          borderColor: '#0f766e'
                         },
                         '&.Mui-focused fieldset': {
-                          borderColor: 'primary.main',
+                          borderColor: '#0f766e',
                           borderWidth: 2
                         }
                       },
                       '& .MuiInputLabel-root': {
                         fontSize: '1.4rem',
-                        lineHeight: 1.6
+                        lineHeight: 1.6,
+                        color: '#64748b'
                       },
                       '& .MuiInputLabel-root.Mui-focused': {
-                        color: 'primary.main'
+                        color: '#0f766e'
                       }
                     }}
                   />
@@ -992,7 +1018,7 @@ export default function EditProfile({ onCancel, onSave }: EditProfileProps) {
                   borderColor: 'grey.300',
                   color: 'text.primary',
                   '&:hover': {
-                    borderColor: 'grey.400',
+                    bordercolor: '#64748b',
                     bgcolor: 'grey.50'
                   }
                 }}

@@ -133,35 +133,35 @@
 }
 
 .admin-chat-user-badge {
-  padding: 4px 12px;
-  border-radius: 12px;
+  padding: 6px 14px;
+  border-radius: 8px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .admin-chat-user-badge.badge-admin {
-  background-color: #fee2e2;
-  color: #dc2626;
+  background-color: rgba(217, 119, 6, 0.1);
+  color: #d97706;
 }
 
 .admin-chat-user-badge.badge-tourist {
-  background-color: #dbeafe;
-  color: #1e40af;
+  background-color: rgba(5, 150, 105, 0.1);
+  color: #047857;
 }
 
 .admin-chat-user-badge.badge-host {
-  background-color: #f3e8ff;
-  color: #6b21a8;
+  background-color: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
 }
 
 .admin-chat-user-badge.badge-agency {
-  background-color: #d1fae5;
-  color: #065f46;
+  background-color: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8;
 }
 
 .admin-chat-user-badge.badge-default {
-  background-color: #e5e7eb;
-  color: #374151;
+  background-color: rgba(71, 85, 105, 0.1);
+  color: #475569;
 }
 
 .admin-chat-messages {

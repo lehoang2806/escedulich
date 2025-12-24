@@ -49,7 +49,7 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
   if (contentType && contentType.includes('application/json')) {
     return response.json()
   }
-  
+
   const text = await response.text()
   return text as T
 }
@@ -83,12 +83,12 @@ export const getPendingPosts = async (): Promise<PendingPost[]> => {
   try {
     const endpoint = '/api/Post/pending'
     console.log('[PostApprovalApi] Fetching pending posts')
-    
+
     const response = await fetchWithFallback(endpoint, {
       method: 'GET',
       headers: ensureAuthHeaders()
     })
-    
+
     if (!response.ok) {
       if (response.status === 404 || response.status === 400) {
         console.warn('[PostApprovalApi] No pending posts found, returning empty array')
@@ -96,13 +96,13 @@ export const getPendingPosts = async (): Promise<PendingPost[]> => {
       }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     }
-    
+
     const result = await handleResponse<any[]>(response)
-    
+
     if (result == null || !Array.isArray(result)) {
       return []
     }
-    
+
     const normalized = result.map(normalizePost)
     console.log(`[PostApprovalApi] Fetched ${normalized.length} pending posts`)
     return normalized
@@ -146,7 +146,7 @@ export const approvePost = async (postId: number): Promise<string> => {
   try {
     const endpoint = '/api/Post/approve'
     console.log('[PostApprovalApi] Approving post:', postId)
-    
+
     const response = await fetchWithFallback(endpoint, {
       method: 'PUT',
       headers: ensureAuthHeaders(),
@@ -154,14 +154,16 @@ export const approvePost = async (postId: number): Promise<string> => {
         PostId: String(postId)
       })
     })
-    
+
     const result = await handleResponse<any>(response)
-    
-    // Lưu thời gian phê duyệt vào Firestore để tất cả users đều có thể truy cập
-    await saveApprovalTimeToFirestore(postId)
+
+    // Lưu thời gian phê duyệt vào Firestore (không await để không block UI)
+    saveApprovalTimeToFirestore(postId).catch(err => {
+      console.warn('[PostApprovalApi] Failed to save approval time to Firestore:', err)
+    })
     // Fallback: cũng lưu vào localStorage
     saveApprovedTime(postId)
-    
+
     console.log('[PostApprovalApi] Post approved successfully')
     return result?.message || 'Đã phê duyệt bài viết thành công.'
   } catch (error: any) {
@@ -179,10 +181,10 @@ export const rejectPost = async (postId: number, comment: string): Promise<strin
     if (!comment?.trim()) {
       throw new Error('Vui lòng nhập lý do từ chối')
     }
-    
+
     const endpoint = '/api/Post/reject'
     console.log('[PostApprovalApi] Rejecting post:', postId)
-    
+
     const response = await fetchWithFallback(endpoint, {
       method: 'PUT',
       headers: ensureAuthHeaders(),
@@ -191,7 +193,7 @@ export const rejectPost = async (postId: number, comment: string): Promise<strin
         Comment: comment.trim()
       })
     })
-    
+
     const result = await handleResponse<any>(response)
     console.log('[PostApprovalApi] Post rejected successfully')
     return result?.message || 'Đã từ chối bài viết.'
@@ -210,10 +212,10 @@ export const reviewPost = async (postId: number, comment: string): Promise<strin
     if (!comment?.trim()) {
       throw new Error('Vui lòng nhập nội dung yêu cầu chỉnh sửa')
     }
-    
+
     const endpoint = '/api/Post/review'
     console.log('[PostApprovalApi] Reviewing post:', postId)
-    
+
     const response = await fetchWithFallback(endpoint, {
       method: 'POST',
       headers: ensureAuthHeaders(),
@@ -222,7 +224,7 @@ export const reviewPost = async (postId: number, comment: string): Promise<strin
         Comment: comment.trim()
       })
     })
-    
+
     const result = await handleResponse<any>(response)
     console.log('[PostApprovalApi] Post review sent successfully')
     return result?.message || 'Đã gửi yêu cầu chỉnh sửa.'

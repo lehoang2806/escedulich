@@ -118,7 +118,13 @@ const formatDateTime = (dateString?: string | null): string => {
 const formatTimeAgo = (dateString?: string | null): string => {
   if (!dateString) return 'Vừa xong'
   try {
-    const date = new Date(dateString)
+    // Backend trả về UTC time, thêm 'Z' nếu chưa có để đảm bảo parse đúng UTC
+    let utcDateString = dateString
+    if (!dateString.endsWith('Z') && !dateString.includes('+') && !dateString.includes('-', 10)) {
+      utcDateString = dateString + 'Z'
+    }
+    
+    const date = new Date(utcDateString)
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)

@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { ArrowLeftIcon, XIcon } from '~/components/user/icons'
 import axiosInstance from '~/utils/axiosInstance'
 import { getUserAvatars } from '~/api/instances/ChatApi'
 import './AdminChat.css'
+
 
 interface Message {
   id: string
@@ -13,6 +15,7 @@ interface Message {
   senderId?: string
   receiverId?: string
 }
+
 
 interface ChatUser {
   UserId?: string
@@ -31,6 +34,7 @@ interface ChatUser {
   lastMessageTime?: string
 }
 
+
 interface AdminChatProps {
   isOpen: boolean
   onClose: () => void
@@ -38,10 +42,14 @@ interface AdminChatProps {
   userName?: string
   userRole?: string
   onRefreshUnread?: () => void
+  initialUserId?: string | null
+  onInitialUserHandled?: () => void
 }
+
 
 // Common emojis
 const EMOJI_LIST = ['😀', '😂', '😍', '🥰', '😊', '😎', '🤔', '😢', '😡', '👍', '👎', '❤️', '🔥', '🎉', '✨', '🙏', '👋', '🤝', '💪', '🌟']
+
 
 // Helper function to parse server timestamp (UTC) to local Date
 const parseServerTimestamp = (dateStr?: string): Date => {
@@ -53,6 +61,7 @@ const parseServerTimestamp = (dateStr?: string): Date => {
   return new Date(dateStr)
 }
 
+
 const AdminChat: React.FC<AdminChatProps> = ({
   isOpen,
   onClose,
@@ -60,6 +69,8 @@ const AdminChat: React.FC<AdminChatProps> = ({
   userName = 'Nguyễn Văn A',
   userRole = 'Du khách',
   onRefreshUnread,
+  initialUserId,
+  onInitialUserHandled,
 }) => {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -75,6 +86,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
   const [userToDelete, setUserToDelete] = useState<ChatUser | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+
   // Get userId helper
   const getUserId = useCallback(() => {
     try {
@@ -89,6 +101,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
       return null
     }
   }, [])
+
 
   // Get current user avatar from localStorage
   const getCurrentUserAvatar = useCallback(() => {
@@ -106,23 +119,28 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }, [])
 
+
   // Setup SignalR connection
   useEffect(() => {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token')
     if (!token || !isOpen) return
 
+
     const apiUrl = import.meta.env.VITE_API_URL || ''
     const hubUrl = apiUrl.replace('/api', '') + '/chathub'
+
 
     const newConnection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, { accessTokenFactory: () => token })
       .withAutomaticReconnect()
       .build()
 
+
     newConnection.on('ReceiveMessage', (message: any) => {
       const currentUserId = getUserId()
       const senderId = String(message.senderId || message.SenderId || '')
       const receiverId = String(message.receiverId || message.ReceiverId || '')
+
 
       // Only add message if it's from someone else (not our own message)
       if (senderId !== currentUserId) {
@@ -138,8 +156,10 @@ const AdminChat: React.FC<AdminChatProps> = ({
       }
     })
 
+
     newConnection.onclose(() => setIsConnected(false))
     newConnection.onreconnected(() => setIsConnected(true))
+
 
     newConnection.start()
       .then(() => {
@@ -148,12 +168,15 @@ const AdminChat: React.FC<AdminChatProps> = ({
       })
       .catch(err => console.error('SignalR Error:', err))
 
+
     setConnection(newConnection)
+
 
     return () => {
       newConnection.stop()
     }
   }, [isOpen, getUserId])
+
 
   // Fetch users on mount
   useEffect(() => {
@@ -162,22 +185,48 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }, [isOpen])
 
+
+  // Auto-select user khi có initialUserId từ bên ngoài
+  useEffect(() => {
+    if (isOpen && initialUserId && allUsers.length > 0) {
+      const targetUser = allUsers.find(u =>
+        String(u.UserId || u.userId) === String(initialUserId)
+      )
+      if (targetUser) {
+        handleSelectUser(targetUser)
+        onInitialUserHandled?.()
+      } else {
+        // Nếu không tìm thấy trong allUsers, tạo user tạm để mở chat
+        const tempUser: ChatUser = {
+          UserId: String(initialUserId),
+          userId: String(initialUserId),
+          FullName: 'Host',
+          fullName: 'Host',
+        }
+        handleSelectUser(tempUser)
+        onInitialUserHandled?.()
+      }
+    }
+  }, [isOpen, initialUserId, allUsers])
+
+
   // Fetch chat history when user is selected + auto-refresh every 3 seconds
   useEffect(() => {
     if (isOpen && selectedUser) {
       const userId = selectedUser.UserId || selectedUser.userId
       if (userId) {
         fetchChatHistory(userId)
-        
+       
         // Auto-refresh every 3 seconds to get new messages
         const interval = setInterval(() => {
           fetchChatHistorySilent(userId)
         }, 3000)
-        
+       
         return () => clearInterval(interval)
       }
     }
   }, [isOpen, selectedUser])
+
 
   const fetchUsers = async () => {
     setLoading(true)
@@ -189,14 +238,17 @@ const AdminChat: React.FC<AdminChatProps> = ({
       const allUsersData = Array.isArray(allRes.data) ? allRes.data : []
       const chattedUsersData = Array.isArray(chattedRes.data) ? chattedRes.data : []
 
+
       // Lấy avatar cho tất cả users sử dụng function từ ChatApi (giống bên Admin)
       const allUserIds = [
         ...allUsersData.map((u: ChatUser) => u.UserId || u.userId),
         ...chattedUsersData.map((u: ChatUser) => u.UserId || u.userId)
       ].filter(Boolean) as string[]
 
+
       // Sử dụng getUserAvatars từ ChatApi (có cache)
       const avatarMap = await getUserAvatars([...new Set(allUserIds)])
+
 
       // Gán avatar vào users
       const allUsersWithAvatar = allUsersData.map((u: ChatUser) => ({
@@ -205,13 +257,16 @@ const AdminChat: React.FC<AdminChatProps> = ({
         avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || ''
       }))
 
+
       const chattedUsersWithAvatar = chattedUsersData.map((u: ChatUser) => ({
         ...u,
         Avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || '',
         avatar: avatarMap.get(u.UserId || u.userId || '') || u.Avatar || u.avatar || ''
       }))
 
+
       console.log('[AdminChat] Users with avatar:', { allUsersWithAvatar, chattedUsersWithAvatar })
+
 
       setAllUsers(allUsersWithAvatar)
       setChattedUsers(chattedUsersWithAvatar)
@@ -222,12 +277,14 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   const fetchChatHistory = async (toUserId: string) => {
     setLoading(true)
     try {
       const response = await axiosInstance.get(`/chat/GetHistory/${toUserId}`)
       const history = response.data || []
       const currentUserId = getUserId()
+
 
       const transformedMessages: Message[] = history.map((msg: any, index: number) => ({
         id: String(msg.Id || msg.id || index),
@@ -237,6 +294,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
         senderId: String(msg.SenderId || msg.senderId || ''),
         receiverId: String(msg.ReceiverId || msg.receiverId || '')
       }))
+
 
       setMessages(transformedMessages)
     } catch (err) {
@@ -247,12 +305,14 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   // Silent fetch - no loading indicator, only update if there are new messages
   const fetchChatHistorySilent = async (toUserId: string) => {
     try {
       const response = await axiosInstance.get(`/chat/GetHistory/${toUserId}`)
       const history = response.data || []
       const currentUserId = getUserId()
+
 
       const transformedMessages: Message[] = history.map((msg: any, index: number) => ({
         id: String(msg.Id || msg.id || index),
@@ -262,6 +322,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
         senderId: String(msg.SenderId || msg.senderId || ''),
         receiverId: String(msg.ReceiverId || msg.receiverId || '')
       }))
+
 
       // Only update if message count changed (new messages)
       setMessages(prev => {
@@ -275,19 +336,22 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+
   const handleSelectUser = async (user: ChatUser) => {
     console.log('[AdminChat] Selected user:', user, 'Avatar:', user.Avatar || user.avatar)
     setSelectedUser(user)
     setMessages([])
-    
+   
     // Mark messages as read when selecting a user
     const userId = user.UserId || user.userId
     if (userId) {
@@ -300,21 +364,25 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   const handleBackToList = () => {
     setSelectedUser(null)
     setMessages([])
   }
 
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !selectedUser) return
+
 
     const toUserId = selectedUser.UserId || selectedUser.userId
     if (!toUserId) return
 
+
     const messageText = inputValue
     const currentUserId = getUserId()
     const msgId = Date.now().toString()
-    
+   
     // Optimistic update - show message immediately
     const newMsg: Message = {
       id: msgId,
@@ -328,18 +396,19 @@ const AdminChat: React.FC<AdminChatProps> = ({
     setInputValue('')
     setShowEmojiPicker(false)
 
+
     // Save to database via API
     try {
       await axiosInstance.post('/chat/SendMessage', {
         toUserId,
         content: messageText
       })
-      
+     
       // Cập nhật danh sách lịch sử chat ngay lập tức
       const updateUserInList = (users: ChatUser[]) => {
         const userId = selectedUser.UserId || selectedUser.userId
         const existingIndex = users.findIndex(u => (u.UserId || u.userId) === userId)
-        
+       
         if (existingIndex >= 0) {
           // User đã có trong danh sách - cập nhật tin nhắn mới nhất và đưa lên đầu
           const updatedUser = {
@@ -363,7 +432,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
           return [newUser, ...users]
         }
       }
-      
+     
       setChattedUsers(prev => updateUserInList(prev))
     } catch (err) {
       console.error('Error sending message:', err)
@@ -373,6 +442,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -380,17 +450,20 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   const handleDeleteClick = (user: ChatUser, e: React.MouseEvent) => {
     e.stopPropagation()
     setUserToDelete(user)
     setShowDeleteDialog(true)
   }
 
+
   const handleConfirmDelete = async () => {
     if (!userToDelete) return
-    
+   
     const userId = userToDelete.UserId || userToDelete.userId
     if (!userId) return
+
 
     try {
       await axiosInstance.delete(`/chat/DeleteConversation/${userId}`)
@@ -403,9 +476,11 @@ const AdminChat: React.FC<AdminChatProps> = ({
     }
   }
 
+
   const handleEmojiClick = (emoji: string) => {
     setInputValue(prev => prev + emoji)
   }
+
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('vi-VN', {
@@ -413,6 +488,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
       minute: '2-digit',
     })
   }
+
 
   const formatRelativeTime = (dateOrStr?: Date | string) => {
     if (!dateOrStr) return ''
@@ -423,19 +499,21 @@ const AdminChat: React.FC<AdminChatProps> = ({
       // Parse string từ server - nếu không có timezone info thì coi như UTC
       date = parseServerTimestamp(dateOrStr)
     }
-    
+   
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
 
+
     if (diffMins < 1) return 'Vừa xong'
     if (diffMins < 60) return `${diffMins} phút trước`
     if (diffHours < 24) return `${diffHours} giờ trước`
     if (diffDays < 7) return `${diffDays} ngày trước`
-    return date.toLocaleDateString('vi-VN')
+    return date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
   }
+
 
   const getRoleBadgeColor = (roleId?: number) => {
     if (roleId === 1) return 'badge-admin'
@@ -444,6 +522,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
     if (roleId === 4) return 'badge-tourist'
     return 'badge-default'
   }
+
 
   const getRoleName = (user: ChatUser) => {
     const role = user.Role || user.role
@@ -456,13 +535,16 @@ const AdminChat: React.FC<AdminChatProps> = ({
     return 'User'
   }
 
+
   // Filter users by search
   const filteredUsers = allUsers.filter(user => {
     const name = user.FullName || user.fullName || ''
     return name.toLowerCase().includes(searchQuery.toLowerCase())
   })
 
+
   if (!isOpen) return null
+
 
   return (
     <div className="admin-chat-overlay">
@@ -479,6 +561,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
             <XIcon className="admin-chat-close-icon" />
           </button>
         </div>
+
 
         {selectedUser ? (
           <>
@@ -497,6 +580,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
                 </div>
               </div>
             </div>
+
 
             {/* Messages */}
             <div className="admin-chat-messages">
@@ -538,6 +622,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
+
             {/* Emoji Picker */}
             {showEmojiPicker && (
               <div className="admin-chat-emoji-picker">
@@ -552,6 +637,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
                 ))}
               </div>
             )}
+
 
             {/* Input */}
             <div className="admin-chat-input-container">
@@ -603,6 +689,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
               </div>
             </div>
 
+
             {/* Search */}
             <div className="admin-chat-search">
               <input
@@ -613,6 +700,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
                 className="admin-chat-search-input"
               />
             </div>
+
 
             {/* User List */}
             <div className="admin-chat-user-list">
@@ -696,7 +784,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
                       )}
                     </div>
                   )}
-                  
+                 
                   {/* Hiện gợi ý khi chưa có lịch sử chat và chưa search */}
                   {!searchQuery.trim() && chattedUsers.length === 0 && (
                     <div className="admin-chat-empty">
@@ -709,6 +797,7 @@ const AdminChat: React.FC<AdminChatProps> = ({
           </>
         )}
       </div>
+
 
       {/* Delete Confirmation Dialog */}
       {showDeleteDialog && userToDelete && (
@@ -739,10 +828,5 @@ const AdminChat: React.FC<AdminChatProps> = ({
   )
 }
 
+
 export default AdminChat
-
-
-
-
-
-

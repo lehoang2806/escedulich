@@ -4,7 +4,7 @@ import Header from './Header'
 import Footer from './Footer'
 import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
-import { requestHostUpgrade } from '~/api/user/instances/RoleUpgradeApi'
+import { requestHostUpgrade, checkAnyPendingUpgradeRequest } from '~/api/user/instances/RoleUpgradeApi'
 import { uploadImageToFirebase } from '~/services/firebaseStorage'
 import {
   ArrowLeftIcon,
@@ -44,23 +44,47 @@ const RegisterHost = () => {
   const [loading, setLoading] = useState(false)
   const [licensePreview, setLicensePreview] = useState<string | null>(null)
   const [hasPendingRequest, setHasPendingRequest] = useState(false)
+  const [pendingType, setPendingType] = useState<'Host' | 'Agency' | null>(null)
   const [isAlreadyUpgraded, setIsAlreadyUpgraded] = useState(false)
+  const [checkingStatus, setCheckingStatus] = useState(true)
 
-  // Kiểm tra role khi component mount
+  // Kiểm tra role và pending request khi component mount
   useEffect(() => {
-    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
-    if (userInfoStr) {
+    const checkUserStatus = async () => {
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+      if (!userInfoStr) {
+        setCheckingStatus(false)
+        return
+      }
+
       try {
         const userInfo = JSON.parse(userInfoStr)
         const roleId = userInfo.RoleId || userInfo.roleId
+        const userId = userInfo.Id || userInfo.id
+
         // RoleId 2 = Host, RoleId 3 = Agency
         if (roleId === 2 || roleId === 3) {
           setIsAlreadyUpgraded(true)
+          setCheckingStatus(false)
+          return
+        }
+
+        // Kiểm tra có đơn pending nào không (cả Host và Agency)
+        if (userId) {
+          const result = await checkAnyPendingUpgradeRequest(parseInt(userId))
+          if (result.hasPending) {
+            setHasPendingRequest(true)
+            setPendingType(result.type || null)
+          }
         }
       } catch (e) {
-        console.error('Error parsing userInfo:', e)
+        console.error('Error checking user status:', e)
       }
+
+      setCheckingStatus(false)
     }
+
+    checkUserStatus()
   }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -223,8 +247,17 @@ const RegisterHost = () => {
             </div>
           </div>
 
-          {/* Hiển thị thông báo nếu đã nâng cấp rồi */}
-          {isAlreadyUpgraded ? (
+          {/* Hiển thị loading khi đang kiểm tra */}
+          {checkingStatus ? (
+            <Card className="reg-host-register-host-form-card">
+              <CardContent>
+                <div className="reg-host-pending-request-notice">
+                  <span className="reg-host-spinner-small" style={{ width: '40px', height: '40px', marginBottom: '1rem' }}></span>
+                  <p className="reg-host-pending-message">Đang kiểm tra trạng thái...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : isAlreadyUpgraded ? (
             <Card className="reg-host-register-host-form-card">
               <CardContent>
                 <div className="reg-host-pending-request-notice">
@@ -251,13 +284,16 @@ const RegisterHost = () => {
             <Card className="reg-host-register-host-form-card">
               <CardContent>
                 <div className="reg-host-pending-request-notice">
-                  <CheckCircleIcon className="reg-host-pending-icon" />
-                  <h2 className="reg-host-pending-title">Yêu cầu đang chờ xử lý</h2>
+                  <AlertCircleIcon className="reg-host-pending-icon" style={{ color: '#f59e0b' }} />
+                  <h2 className="reg-host-pending-title">Bạn đã gửi đơn trước đó rồi</h2>
                   <p className="reg-host-pending-message">
-                    Bạn đã có yêu cầu nâng cấp lên Host đang chờ Admin phê duyệt.
+                    Vui lòng đợi Admin xử lý!
                   </p>
                   <p className="reg-host-pending-note">
-                    Vui lòng đợi Admin xét duyệt trong vòng 1-3 ngày làm việc. 
+                    {pendingType === 'Agency' 
+                      ? 'Bạn đã có đơn đăng ký Agency đang chờ xử lý. '
+                      : 'Bạn đã có đơn đăng ký Host đang chờ xử lý. '}
+                    Yêu cầu của bạn sẽ được Admin xét duyệt trong vòng 1-3 ngày làm việc. 
                     Bạn sẽ nhận được thông báo khi yêu cầu được xử lý.
                   </p>
                   <Button

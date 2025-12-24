@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import SummaryCard from '~/components/common/SummaryCard'
 import { fetchDashboardData } from '~/api/instances/DashboardApi'
 import type { DashboardDto } from '~/api/instances/DashboardApi'
-import LegendToggleIcon from '@mui/icons-material/LegendToggle'
-import EmailIcon from '@mui/icons-material/Email'
-import HeadphonesIcon from '@mui/icons-material/Headphones'
+import ArticleIcon from '@mui/icons-material/Article'
+import NewspaperIcon from '@mui/icons-material/Newspaper'
+import MiscellaneousServicesIcon from '@mui/icons-material/MiscellaneousServices'
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline'
 import Box from '@mui/material/Box'
 import type { SummaryCardProps } from '~/types/common'
@@ -33,6 +33,8 @@ export default function HeaderDashBoardContent() {
           postGrowth: 'Đang tải...',
           totalServiceCombos: 0,
           serviceComboGrowth: '',
+          totalNews: 0,
+          newsGrowth: '',
           totalRevenue: 0,
           revenueGrowth: '',
           totalBookings: 0,
@@ -84,7 +86,7 @@ export default function HeaderDashBoardContent() {
 
   const headerDashboardConfig: SummaryCardProps[] = [
     {
-      title: 'Tổng Users',
+      title: 'Tổng User',
       value: dashboardData.totalUsers.toLocaleString('vi-VN'),
       subtitle: 'Người dùng hệ thống',
       bgColor: 'bg-linear-to-br from-blue-50 to-blue-100',
@@ -92,26 +94,26 @@ export default function HeaderDashBoardContent() {
       icon: <PeopleOutlineIcon sx={{ fontSize: '2rem' }} />
     },
     {
-      title: 'Lượt tương tác',
-      value: dashboardData.totalViews.toLocaleString('vi-VN'),
-      subtitle: 'Tổng tương tác hệ thống',
-      icon: <LegendToggleIcon sx={{ fontSize: '2rem' }} />,
+      title: 'Bài viết',
+      value: dashboardData.totalPosts.toLocaleString('vi-VN'),
+      subtitle: 'Tổng bài viết',
+      icon: <ArticleIcon sx={{ fontSize: '2rem' }} />,
       bgColor: 'bg-linear-to-br from-green-50 to-green-100',
       textColor: 'text-green-600'
     },
     {
-      title: 'Bài viết',
-      value: dashboardData.totalPosts.toLocaleString('vi-VN'),
-      subtitle: 'Tổng bài viết',
-      icon: <EmailIcon sx={{ fontSize: '2rem' }} />,
+      title: 'Số lượng dịch vụ',
+      value: dashboardData.totalServiceCombos.toLocaleString('vi-VN'),
+      subtitle: 'Tổng dịch vụ',
+      icon: <MiscellaneousServicesIcon sx={{ fontSize: '2rem' }} />,
       bgColor: 'bg-linear-to-br from-purple-50 to-purple-100',
       textColor: 'text-purple-600'
     },
     {
-      title: 'Hỗ trợ',
-      value: dashboardData.pendingSupports.toString(),
-      subtitle: 'Tickets chờ xử lí',
-      icon: <HeadphonesIcon sx={{ fontSize: '2rem' }} />,
+      title: 'Tin tức',
+      value: dashboardData.totalNews.toLocaleString('vi-VN'),
+      subtitle: 'Tổng tin tức',
+      icon: <NewspaperIcon sx={{ fontSize: '2rem' }} />,
       bgColor: 'bg-linear-to-br from-orange-50 to-orange-100',
       textColor: 'text-orange-600'
     }

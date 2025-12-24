@@ -95,13 +95,6 @@ const Footer = () => {
               <p className="footer-footer-copyright">
                 © {currentYear} ESCE Du Lịch Sinh Thái. Tất cả quyền được bảo lưu.
               </p>
-              <div className="footer-footer-bottom-links">
-                <Link to="/policy">Chính sách</Link>
-                <span className="footer-footer-separator">|</span>
-                <Link to="/terms">Điều khoản</Link>
-                <span className="footer-footer-separator">|</span>
-                <Link to="/privacy">Bảo mật</Link>
-              </div>
             </div>
           </div>
         </div>

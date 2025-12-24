@@ -32,80 +32,60 @@ export const useUserLevel = (userId: number | null): UserLevelData => {
         setLoading(true)
         setError(null)
 
-        // Gọi API để lấy thông tin user mới nhất (bao gồm TotalSpent và Level)
-        const response = await axiosInstance.get(`${API_ENDPOINTS.USER}/${userId}`)
-        const userData = response.data
+        // Lấy tất cả booking của user
+        const bookingsResponse = await axiosInstance.get(`${API_ENDPOINTS.BOOKING}/user/${userId}`)
+        const bookings = bookingsResponse.data || []
+        
+        // Lọc booking đã hoàn thành và cộng tổng tiền
+        // Giá TotalAmount đã là giá cuối cùng (đã bao gồm giảm giá Agency nếu có)
+        const completedBookings = bookings.filter((b: any) => 
+          (b.Status || b.status || '').toLowerCase() === 'completed'
+        )
+        
+        // Log chi tiết từng booking đã hoàn thành
+        console.log(`📋 [useUserLevel] UserId=${userId}, Total bookings=${bookings.length}, Completed=${completedBookings.length}`)
+        completedBookings.forEach((b: any, index: number) => {
+          const bookingId = b.Id || b.id
+          const amount = b.TotalAmount || b.totalAmount || 0
+          const serviceName = b.ServiceCombo?.Name || b.serviceCombo?.name || b.Service?.Name || b.service?.name || 'Unknown'
+          console.log(`  ${index + 1}. Booking #${bookingId}: ${serviceName} - ${amount.toLocaleString()}đ`)
+        })
+        
+        const calculatedTotalSpent = completedBookings.reduce((sum: number, b: any) => {
+          const amount = b.TotalAmount || b.totalAmount || 0
+          return sum + amount
+        }, 0)
+        
+        console.log(`✅ [useUserLevel] TotalSpent = ${calculatedTotalSpent.toLocaleString()}đ`)
 
-        console.log('🔍 [useUserLevel] Raw API Response:', userData)
+        const spent = Math.round(calculatedTotalSpent)
+        const calculatedLevel = calculateLevel(spent)
 
-        if (userData) {
-          // Lấy TotalSpent từ API response - check tất cả các casing có thể
-          const dbTotalSpent = userData.TotalSpent ?? userData.totalSpent ?? userData.totalspent ?? 0
-          const spent = Number(dbTotalSpent) || 0
+        setTotalSpent(spent)
+        setLevel(calculatedLevel)
 
-          // QUAN TRỌNG: Luôn tính level từ totalSpent để đảm bảo chính xác
-          // Không dựa vào database level vì có thể chưa được sync
-          const calculatedLevel = calculateLevel(spent)
-
-          console.log(`✅ [useUserLevel] API Response: TotalSpent=${spent}, Calculated Level=${calculatedLevel}`)
-
-          setTotalSpent(spent)
-          setLevel(calculatedLevel)
-
-          // Cập nhật localStorage để sync với các component khác (Header)
-          const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
-          if (userInfoStr) {
-            try {
-              const userInfo = JSON.parse(userInfoStr)
-              const updatedUserInfo = {
-                ...userInfo,
-                TotalSpent: spent,
-                totalSpent: spent
-              }
-              if (localStorage.getItem('userInfo')) {
-                localStorage.setItem('userInfo', JSON.stringify(updatedUserInfo))
-              }
-              if (sessionStorage.getItem('userInfo')) {
-                sessionStorage.setItem('userInfo', JSON.stringify(updatedUserInfo))
-              }
-              // Dispatch event để Header cập nhật
-              window.dispatchEvent(new Event('userStorageChange'))
-            } catch (parseErr) {
-              console.warn('⚠️ [useUserLevel] Could not update localStorage:', parseErr)
+        // Cập nhật localStorage
+        const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+        if (userInfoStr) {
+          try {
+            const userInfo = JSON.parse(userInfoStr)
+            const updatedUserInfo = { ...userInfo, TotalSpent: spent, totalSpent: spent }
+            if (localStorage.getItem('userInfo')) {
+              localStorage.setItem('userInfo', JSON.stringify(updatedUserInfo))
             }
+            if (sessionStorage.getItem('userInfo')) {
+              sessionStorage.setItem('userInfo', JSON.stringify(updatedUserInfo))
+            }
+            window.dispatchEvent(new Event('userStorageChange'))
+          } catch (parseErr) {
+            console.warn('⚠️ [useUserLevel] Could not update localStorage:', parseErr)
           }
-        } else {
-          console.log('⚠️ [useUserLevel] No user data from API')
-          setTotalSpent(0)
-          setLevel('default')
         }
       } catch (err: any) {
-        console.error('❌ [useUserLevel] Error fetching user data:', err)
-        
-        // Fallback: đọc từ localStorage nếu API fail
-        try {
-          const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
-          if (userInfoStr) {
-            const userInfo = JSON.parse(userInfoStr)
-            const dbTotalSpent = userInfo.TotalSpent ?? userInfo.totalSpent ?? 0
-            const spent = Number(dbTotalSpent) || 0
-            const calculatedLevel = calculateLevel(spent)
-            
-            console.log(`⚠️ [useUserLevel] Fallback to localStorage: TotalSpent=${spent}, Level=${calculatedLevel}`)
-            
-            setTotalSpent(spent)
-            setLevel(calculatedLevel)
-            setError(null) // Clear error since we have fallback data
-          } else {
-            setError('Không thể tải thông tin level')
-            setTotalSpent(0)
-            setLevel('default')
-          }
-        } catch (fallbackErr) {
-          setError('Không thể tải thông tin level')
-          setTotalSpent(0)
-          setLevel('default')
-        }
+        console.error('❌ [useUserLevel] Error:', err)
+        setError('Không thể tải thông tin level')
+        setTotalSpent(0)
+        setLevel('default')
       } finally {
         setLoading(false)
       }

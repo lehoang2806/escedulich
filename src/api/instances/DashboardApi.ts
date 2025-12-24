@@ -7,6 +7,8 @@ export type DashboardDto = {
   postGrowth: string
   totalServiceCombos: number
   serviceComboGrowth: string
+  totalNews: number
+  newsGrowth: string
   totalRevenue: number
   revenueGrowth: string
   totalBookings: number
@@ -51,6 +53,8 @@ const MOCK_DASHBOARD: DashboardDto = {
   postGrowth: '+8% so với kỳ trước',
   totalServiceCombos: 45,
   serviceComboGrowth: '+5% so với kỳ trước',
+  totalNews: 28,
+  newsGrowth: '+10% so với kỳ trước',
   totalRevenue: 2500000000,
   revenueGrowth: '+15% so với kỳ trước',
   totalBookings: 156,
@@ -165,6 +169,7 @@ const normalizeDashboard = (payload: DashboardStatisticsDto, extraData?: any): D
   // Extract extra data from additional API calls
   const badges = extraData?.badges || {}
   const postStats = extraData?.postStats || {}
+  const totalNews = extraData?.totalNews ?? 0
 
   return {
     totalUsers,
@@ -173,6 +178,8 @@ const normalizeDashboard = (payload: DashboardStatisticsDto, extraData?: any): D
     postGrowth: formatGrowthPercent(postsGrowthPercent),
     totalServiceCombos,
     serviceComboGrowth: formatGrowthPercent(serviceCombosGrowthPercent),
+    totalNews,
+    newsGrowth: '',
     totalRevenue,
     revenueGrowth: formatGrowthPercent(revenueGrowthPercent),
     totalBookings,
@@ -212,13 +219,17 @@ export const fetchDashboardData = async (
   if (endDate) params.append('endDate', endDate)
 
   // Fetch statistics in parallel
-  const [dashboardData, badges, postStats] = await Promise.all([
+  const [dashboardData, badges, postStats, newsData] = await Promise.all([
     authorizedRequest(`/api/statistics/dashboard?${params.toString()}`, { method: 'GET' }),
     authorizedRequest('/api/statistics/admin-badges', { method: 'GET' }).catch(() => ({})),
-    authorizedRequest(`/api/statistics/posts?${params.toString()}`, { method: 'GET' }).catch(() => ({}))
+    authorizedRequest(`/api/statistics/posts?${params.toString()}`, { method: 'GET' }).catch(() => ({})),
+    authorizedRequest('/api/news', { method: 'GET' }).catch(() => [])
   ])
 
-  return normalizeDashboard(dashboardData, { badges, postStats })
+  // Count total news from news API response
+  const totalNews = Array.isArray(newsData) ? newsData.length : 0
+
+  return normalizeDashboard(dashboardData, { badges, postStats, totalNews })
 }
 
 // Time Series DTO for charts

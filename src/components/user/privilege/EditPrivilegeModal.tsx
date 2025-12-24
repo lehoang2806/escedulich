@@ -37,7 +37,7 @@ interface EditPrivilegeModalProps {
   bonusService: BonusServiceData | null;
   onSuccess?: (message: string) => void;
   onError?: (message: string) => void;
-  onUpdated?: () => void;
+  onUpdated?: (updatedPromotion: any) => void;
 }
 
 const EditPrivilegeModal: React.FC<EditPrivilegeModalProps> = ({
@@ -231,12 +231,12 @@ const EditPrivilegeModal: React.FC<EditPrivilegeModalProps> = ({
       }
       submitData.append('TargetAudience', JSON.stringify(targetAudience));
 
-      await axiosInstance.put(`${API_ENDPOINTS.BONUS_SERVICE}/${bonusId}`, submitData, {
+      const response = await axiosInstance.put(`${API_ENDPOINTS.BONUS_SERVICE}/${bonusId}`, submitData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
       if (onSuccess) onSuccess('Cập nhật ưu đãi thành công!');
-      if (onUpdated) onUpdated();
+      if (onUpdated) onUpdated(response.data);
       handleClose();
     } catch (err: any) {
       console.error('Error updating bonus service:', err);

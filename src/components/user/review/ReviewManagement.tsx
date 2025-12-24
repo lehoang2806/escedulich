@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import Button from '../ui/Button';
 import LoadingSpinner from '../LoadingSpinner';
@@ -7,6 +7,7 @@ import ReplyReviewModal from './ReplyReviewModal';
 import { getImageUrl } from '~/lib/utils';
 import axiosInstance from '~/utils/axiosInstance';
 import { API_ENDPOINTS } from '~/config/api';
+import { useNotification } from '~/contexts/NotificationContext';
 import './ReviewManagement.css';
 
 interface ReviewManagementProps {
@@ -15,6 +16,9 @@ interface ReviewManagementProps {
 }
 
 const ReviewManagement: React.FC<ReviewManagementProps> = ({ onSuccess, onError }) => {
+  // SignalR connection để lắng nghe notification real-time
+  const { connection, isConnected } = useNotification();
+  
   // Reviews state
   const [reviews, setReviews] = useState([]);
   const [filteredReviews, setFilteredReviews] = useState([]);
@@ -40,6 +44,11 @@ const ReviewManagement: React.FC<ReviewManagementProps> = ({ onSuccess, onError 
   const [deletingReviewId, setDeletingReviewId] = useState(null);
   const [openReviewMenuId, setOpenReviewMenuId] = useState(null);
   const [submittingReview, setSubmittingReview] = useState(false);
+  
+  // Ref để skip page reset khi có review mới
+  const skipPageResetRef = useRef(false);
+  // Cache host combos để dùng cho refresh
+  const hostCombosRef = useRef<any[]>([]);
 
   // Get user ID helper
   const getUserId = useCallback(() => {
@@ -150,6 +159,7 @@ const ReviewManagement: React.FC<ReviewManagementProps> = ({ onSuccess, onError 
         
         console.log('📊 [ReviewManagement] Host reviews found:', enrichedReviews.length);
         setReviews(enrichedReviews);
+        hostCombosRef.current = hostCombos; // Cache host combos
       } catch (err) {
         console.error('Error loading reviews:', err);
         if (onError) {
@@ -162,7 +172,126 @@ const ReviewManagement: React.FC<ReviewManagementProps> = ({ onSuccess, onError 
     };
 
     fetchReviews();
-  }, [getUserId, onError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getUserId]);
+
+  // Hàm refresh reviews (không hiển thị loading)
+  const refreshReviews = useCallback(async () => {
+    const userId = getUserId();
+    if (!userId) return;
+
+    try {
+      console.log('📊 [ReviewManagement] Refreshing reviews...');
+      
+      // Sử dụng cached host combos nếu có, nếu không thì fetch lại
+      let hostCombos = hostCombosRef.current;
+      if (!hostCombos || hostCombos.length === 0) {
+        const serviceComboResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO}/host/${userId}`);
+        hostCombos = serviceComboResponse.data || [];
+        hostCombosRef.current = hostCombos;
+      }
+      
+      const hostComboIds = hostCombos.map(c => c.Id || c.id);
+      
+      if (hostComboIds.length === 0) return;
+      
+      const response = await axiosInstance.get(API_ENDPOINTS.REVIEW);
+      const allReviews = response.data || [];
+      
+      const hostReviews = allReviews.filter(review => {
+        const booking = review.Booking || review.booking;
+        if (!booking) return false;
+        
+        const serviceComboId = 
+          booking.ServiceComboId || 
+          booking.serviceComboId || 
+          booking.ServicecomboId ||
+          booking.servicecomboId ||
+          (booking.ServiceCombo?.Id) || 
+          (booking.ServiceCombo?.id) ||
+          (booking.serviceCombo?.Id) || 
+          (booking.serviceCombo?.id);
+        
+        return serviceComboId && hostComboIds.includes(serviceComboId);
+      });
+      
+      const enrichedReviews = hostReviews.map(review => {
+        const booking = review.Booking || review.booking;
+        const serviceComboId = 
+          booking?.ServiceComboId || 
+          booking?.serviceComboId || 
+          booking?.ServicecomboId ||
+          booking?.servicecomboId;
+        
+        const matchingCombo = hostCombos.find(c => (c.Id || c.id) === serviceComboId);
+        
+        if (matchingCombo && booking && !booking.ServiceCombo && !booking.serviceCombo) {
+          booking.ServiceCombo = matchingCombo;
+        }
+        
+        return review;
+      });
+      
+      // Chỉ update nếu có thay đổi
+      if (enrichedReviews.length !== reviews.length || 
+          JSON.stringify(enrichedReviews.map(r => r.Id || r.id).sort()) !== JSON.stringify(reviews.map((r: any) => r.Id || r.id).sort())) {
+        skipPageResetRef.current = true;
+        setReviews(enrichedReviews);
+        console.log('📊 [ReviewManagement] Reviews refreshed, total:', enrichedReviews.length);
+      }
+    } catch (err) {
+      console.error('Error refreshing reviews:', err);
+    }
+  }, [getUserId, reviews]);
+
+  // Auto-refresh reviews mỗi 15 giây
+  useEffect(() => {
+    const intervalId = setInterval(refreshReviews, 15000);
+    return () => clearInterval(intervalId);
+  }, [refreshReviews]);
+
+  // Lắng nghe notification từ SignalR để refresh ngay khi có review mới
+  useEffect(() => {
+    if (!connection || !isConnected) return;
+
+    const handleReceiveNotification = (notification: { Title?: string; Message?: string; Type?: string }) => {
+      console.log('[ReviewManagement] Received notification:', notification);
+      const title = (notification.Title || '').toLowerCase();
+      const message = (notification.Message || '').toLowerCase();
+      const type = (notification.Type || '').toLowerCase();
+      
+      const isReviewNotification = 
+        title.includes('đánh giá') || 
+        title.includes('review') ||
+        title.includes('nhận xét') ||
+        message.includes('đánh giá') ||
+        message.includes('review') ||
+        message.includes('nhận xét') ||
+        type.includes('review') ||
+        type === 'new_review' ||
+        type === 'review_created';
+        
+      if (isReviewNotification) {
+        console.log('[ReviewManagement] Detected review notification, refreshing...');
+        refreshReviews();
+      }
+    };
+
+    const handleNewReview = (reviewData: any) => {
+      console.log('[ReviewManagement] Received NewReview event:', reviewData);
+      refreshReviews();
+    };
+
+    connection.on('ReceiveNotification', handleReceiveNotification);
+    connection.on('NewReview', handleNewReview);
+    connection.on('ReviewCreated', handleNewReview);
+
+    return () => {
+      connection.off('ReceiveNotification', handleReceiveNotification);
+      connection.off('NewReview', handleNewReview);
+      connection.off('ReviewCreated', handleNewReview);
+    };
+  }, [connection, isConnected, refreshReviews]);
 
   // Get sorted and filtered reviews
   const sortedAndFilteredReviews = useMemo(() => {

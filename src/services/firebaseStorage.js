@@ -24,7 +24,7 @@ export const uploadImageToFirebase = async (file, folder = 'images') => {
         throw new Error('Firebase Authentication required. Please log out and log back in to enable image uploads.');
       }
     }
-    */
+   */
 
     // Validate file type - allow images and PDF for license files
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];

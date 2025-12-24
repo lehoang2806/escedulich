@@ -163,5 +163,61 @@ export const requestAgencyUpgradeWithPayment = async (payload: {
   }
 }
 
+// Kiểm tra xem user có đơn upgrade pending nào không (cả Host và Agency)
+export const checkAnyPendingUpgradeRequest = async (userId: number): Promise<{ hasPending: boolean; type?: 'Host' | 'Agency' }> => {
+  try {
+    console.log('🔍 [checkAnyPendingUpgradeRequest] Checking for userId:', userId)
+    
+    // Gọi cả 2 API để lấy TẤT CẢ certificates (không filter status vì API có thể không hoạt động đúng)
+    const [hostResponse, agencyResponse] = await Promise.all([
+      fetchWithFallback('/user/host-certificates', {
+        method: 'GET',
+        headers: ensureAuthHeaders()
+      }),
+      fetchWithFallback('/user/agency-certificates', {
+        method: 'GET',
+        headers: ensureAuthHeaders()
+      })
+    ])
+
+    let hostCerts: HostCertificate[] = []
+    let agencyCerts: AgencyCertificate[] = []
+
+    if (hostResponse.ok) {
+      hostCerts = await hostResponse.json()
+      console.log('📋 [checkAnyPendingUpgradeRequest] Host certificates:', hostCerts.length)
+    }
+    if (agencyResponse.ok) {
+      agencyCerts = await agencyResponse.json()
+      console.log('📋 [checkAnyPendingUpgradeRequest] Agency certificates:', agencyCerts.length)
+    }
+
+    // Kiểm tra xem user có certificate pending nào không (check cả lowercase và uppercase)
+    const isPendingStatus = (status: string | null | undefined) => {
+      if (!status) return false
+      const s = status.toLowerCase()
+      return s === 'pending' || s === 'review'
+    }
+
+    const userHostPending = hostCerts.find(c => c.hostId === userId && isPendingStatus(c.status))
+    const userAgencyPending = agencyCerts.find(c => c.accountId === userId && isPendingStatus(c.status))
+
+    console.log('🔍 [checkAnyPendingUpgradeRequest] User Host Pending:', userHostPending)
+    console.log('🔍 [checkAnyPendingUpgradeRequest] User Agency Pending:', userAgencyPending)
+
+    if (userHostPending) {
+      return { hasPending: true, type: 'Host' }
+    }
+    if (userAgencyPending) {
+      return { hasPending: true, type: 'Agency' }
+    }
+
+    return { hasPending: false }
+  } catch (error) {
+    console.error('❌ [checkAnyPendingUpgradeRequest] Error:', error)
+    return { hasPending: false }
+  }
+}
+
 
 

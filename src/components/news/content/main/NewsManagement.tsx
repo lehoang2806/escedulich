@@ -47,6 +47,7 @@ import {
   type UpdateNewsDto
 } from '~/api/instances/NewsApi'
 
+
 const getRoleColor = (role: string) => {
   switch (role?.toLowerCase()) {
     case 'admin':
@@ -61,26 +62,36 @@ const getRoleColor = (role: string) => {
   }
 }
 
+
 const formatTimeAgo = (dateString?: string) => {
   if (!dateString) return 'Vừa xong'
 
+
   try {
-    const date = new Date(dateString)
+    // Backend trả về UTC time, thêm 'Z' nếu chưa có để đảm bảo parse đúng UTC
+    let utcDateString = dateString
+    if (!dateString.endsWith('Z') && !dateString.includes('+') && !dateString.includes('-', 10)) {
+      utcDateString = dateString + 'Z'
+    }
+    
+    const date = new Date(utcDateString)
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
 
+
     if (diffMins < 1) return 'Vừa xong'
     if (diffMins < 60) return `${diffMins} phút trước`
     if (diffHours < 24) return `${diffHours} giờ trước`
     if (diffDays < 30) return `${diffDays} ngày trước`
-    return date.toLocaleDateString('vi-VN')
+    return date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
   } catch {
     return 'Vừa xong'
   }
 }
+
 
 export default function NewsManagement() {
   const [news, setNews] = useState<NewsDto[]>([])
@@ -88,13 +99,15 @@ export default function NewsManagement() {
   const [error, setError] = useState<string | null>(null)
   const [searchText, setSearchText] = useState('')
 
+
   // Create News State
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
-  const [newSocialLink, setNewSocialLink] = useState('')
   const [newImages, setNewImages] = useState<File[]>([])
   const [newImagePreviews, setNewImagePreviews] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
+
 
   // Edit News State
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -106,13 +119,16 @@ export default function NewsManagement() {
   const [editNewImagePreviews, setEditNewImagePreviews] = useState<string[]>([])
   const [updating, setUpdating] = useState(false)
 
+
   // Delete News State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingNews, setDeletingNews] = useState<NewsDto | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+
   // Menu State
   const [menuAnchor, setMenuAnchor] = useState<{ [key: number]: HTMLElement | null }>({})
+
 
   // Get current user
   const getCurrentUser = () => {
@@ -127,7 +143,9 @@ export default function NewsManagement() {
     return null
   }
 
+
   const currentUser = getCurrentUser()
+
 
   // Debug: Log user info to console with full details
   useEffect(() => {
@@ -146,6 +164,7 @@ export default function NewsManagement() {
     console.log('==========================')
   }, [currentUser])
 
+
   // Check if user is Admin - check multiple possible property names and roleId
   const isAdmin =
     currentUser?.role === 'Admin' ||
@@ -158,15 +177,55 @@ export default function NewsManagement() {
     (typeof currentUser?.roleName === 'string' && currentUser.roleName.toLowerCase() === 'admin') ||
     (typeof currentUser?.RoleName === 'string' && currentUser.RoleName.toLowerCase() === 'admin')
 
+
   // Log isAdmin result
   useEffect(() => {
     console.log('isAdmin result:', isAdmin)
   }, [isAdmin])
 
+
   // Load News
   useEffect(() => {
     loadNews()
+
+    // Lắng nghe BroadcastChannel để nhận updates realtime từ user (like/unlike)
+    let newsChannel: BroadcastChannel | null = null
+    try {
+      newsChannel = new BroadcastChannel('news-updates')
+      newsChannel.onmessage = (event) => {
+        const { type } = event.data || {}
+        if (type === 'NEWS_LIKED' || type === 'NEWS_DELETED' || type === 'NEWS_CREATED' || type === 'NEWS_UPDATED') {
+          console.log(`[Admin] Received ${type} broadcast, refreshing...`)
+          loadNewsQuiet()
+        }
+      }
+    } catch (e) {
+      console.log('BroadcastChannel not supported')
+    }
+
+    // Fallback: Auto-refresh mỗi 10 giây
+    const refreshInterval = setInterval(() => {
+      loadNewsQuiet()
+    }, 10000)
+
+    return () => {
+      clearInterval(refreshInterval)
+      if (newsChannel) {
+        newsChannel.close()
+      }
+    }
   }, [])
+
+  // Load news không hiển thị loading (dùng cho auto-refresh)
+  const loadNewsQuiet = async () => {
+    try {
+      const data = await fetchAllNews()
+      setNews(data || [])
+    } catch (err) {
+      console.error('Error auto-refreshing news:', err)
+    }
+  }
+
 
   const loadNews = async () => {
     try {
@@ -187,6 +246,7 @@ export default function NewsManagement() {
     }
   }
 
+
   // Filter News
   const filteredNews = useMemo(() => {
     if (!searchText.trim()) return news
@@ -198,28 +258,32 @@ export default function NewsManagement() {
     )
   }, [news, searchText])
 
+
   // Create News Handlers
   const handleOpenCreateDialog = () => {
     setCreateDialogOpen(true)
+    setNewTitle('')
     setNewContent('')
-    setNewSocialLink('')
     setNewImages([])
     setNewImagePreviews([])
   }
 
+
   const handleCloseCreateDialog = () => {
     setCreateDialogOpen(false)
+    setNewTitle('')
     setNewContent('')
-    setNewSocialLink('')
     setNewImages([])
     setNewImagePreviews([])
     setError(null) // Clear error when closing dialog
   }
 
+
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0) {
       const fileArray = Array.from(files)
+
 
       // Validate file types
       const validFiles = fileArray.filter((file) => {
@@ -230,9 +294,11 @@ export default function NewsManagement() {
         return true
       })
 
+
       if (validFiles.length === 0) {
         return
       }
+
 
       // Add new files (don't append to existing, replace if needed)
       setNewImages((prev) => {
@@ -243,6 +309,7 @@ export default function NewsManagement() {
         return [...prev, ...newFiles]
       })
 
+
       // Create previews
       const previews = validFiles.map((file) => URL.createObjectURL(file))
       setNewImagePreviews((prev) => {
@@ -250,10 +317,12 @@ export default function NewsManagement() {
         return [...prev, ...previews]
       })
 
+
       // Reset input to allow selecting same file again
       e.target.value = ''
     }
   }
+
 
   const removeNewImage = (index: number) => {
     setNewImages((prev) => prev.filter((_, i) => i !== index))
@@ -263,12 +332,28 @@ export default function NewsManagement() {
     })
   }
 
+
   const handleCreateNews = async () => {
+    // Validate title
+    if (!newTitle.trim()) {
+      setError('Tiêu đề tin tức không được để trống')
+      return
+    }
+
+
+    // Validate title length
+    if (newTitle.trim().length > 200) {
+      setError('Tiêu đề tin tức tối đa 200 ký tự')
+      return
+    }
+
+
     // Backend requires Content to be non-empty (Required attribute)
     if (!newContent.trim()) {
       setError('Nội dung tin tức không được để trống')
       return
     }
+
 
     // Validate content length
     if (newContent.trim().length > 4000) {
@@ -276,19 +361,23 @@ export default function NewsManagement() {
       return
     }
 
-    // Validate social link length if provided
-    if (newSocialLink.trim().length > 500) {
-      setError('Link mạng xã hội tối đa 500 ký tự')
+
+    // Validate at least 1 image is required
+    if (newImages.length === 0) {
+      setError('Vui lòng thêm ít nhất 1 hình ảnh cho tin tức')
       return
     }
+
 
     try {
       setCreating(true)
       setError(null) // Clear previous errors
 
+
       // Upload images to Firebase - ensure no duplicates
       const imageUrls: string[] = []
       const processedFiles = new Set<string>() // Track processed file names to avoid duplicates
+
 
       for (const file of newImages) {
         // Skip if already processed (duplicate check)
@@ -296,6 +385,7 @@ export default function NewsManagement() {
           console.warn(`Skipping duplicate file: ${file.name}`)
           continue
         }
+
 
         try {
           const url = await uploadImageToFirebase(file, 'news')
@@ -310,23 +400,36 @@ export default function NewsManagement() {
         }
       }
 
+
       if (imageUrls.length === 0 && newImages.length > 0) {
         setError('Không thể upload ảnh. Vui lòng thử lại với ảnh khác.')
         setCreating(false)
         return
       }
 
+
       console.log(`Creating news with ${imageUrls.length} images`)
 
+
       const dto: CreateNewsDto = {
+        title: newTitle.trim(),
         content: newContent.trim(),
-        socialMediaLink: newSocialLink.trim() || undefined,
         images: imageUrls.length > 0 ? imageUrls : undefined
       }
+
 
       await createNews(dto)
       await loadNews()
       handleCloseCreateDialog()
+
+      // Broadcast để các tab/window khác biết có tin tức mới
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_CREATED', timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
 
       // Show success message (optional)
       console.log('News created successfully')
@@ -339,21 +442,23 @@ export default function NewsManagement() {
     }
   }
 
+
   // Edit News Handlers
   const handleOpenEditDialog = (newsItem: NewsDto) => {
     console.log('🔵 [Edit News] Opening edit dialog for news:', newsItem.newsId)
     console.log('🔵 [Edit News] newsItem.images:', newsItem.images)
     console.log('🔵 [Edit News] newsItem.images length:', newsItem.images?.length)
-    
+   
     setEditingNews(newsItem)
     setEditContent(newsItem.content)
-    setEditSocialLink(newsItem.socialMediaLink || '')
+    setEditSocialLink('')
     setEditImages(newsItem.images ? [...newsItem.images] : [])
     setEditNewImages([])
     setEditNewImagePreviews([])
     setEditDialogOpen(true)
     handleMenuClose(newsItem.newsId)
   }
+
 
   const handleCloseEditDialog = () => {
     setEditDialogOpen(false)
@@ -365,10 +470,12 @@ export default function NewsManagement() {
     setEditNewImagePreviews([])
   }
 
+
   const handleEditImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0) {
       const fileArray = Array.from(files)
+
 
       // Validate file types
       const validFiles = fileArray.filter((file) => {
@@ -385,9 +492,11 @@ export default function NewsManagement() {
         return true
       })
 
+
       if (validFiles.length === 0) {
         return
       }
+
 
       // Add new files (avoid duplicates)
       setEditNewImages((prev) => {
@@ -396,14 +505,17 @@ export default function NewsManagement() {
         return [...prev, ...newFiles]
       })
 
+
       // Create previews
       const previews = validFiles.map((file) => URL.createObjectURL(file))
       setEditNewImagePreviews((prev) => [...prev, ...previews])
+
 
       // Reset input to allow selecting same file again
       e.target.value = ''
     }
   }
+
 
   const removeEditImage = async (index: number, isNew: boolean) => {
     if (isNew) {
@@ -427,12 +539,15 @@ export default function NewsManagement() {
     }
   }
 
+
   const handleUpdateNews = async () => {
     if (!editingNews) return
+
 
     try {
       setUpdating(true)
       setError(null)
+
 
       // Upload new images to Firebase
       const newImageUrls: string[] = []
@@ -445,18 +560,42 @@ export default function NewsManagement() {
         }
       }
 
+
       // Combine existing and new images
       const allImages = [...editImages, ...newImageUrls]
 
+
       const dto: UpdateNewsDto = {
         content: editContent.trim() || undefined,
-        socialMediaLink: editSocialLink.trim() || undefined,
         images: allImages.length > 0 ? allImages : undefined
       }
 
+
       await updateNews(editingNews.newsId, dto)
-      await loadNews()
+      
+      // Cập nhật state trực tiếp thay vì reload toàn bộ
+      setNews((prev) =>
+        prev.map((item) =>
+          item.newsId === editingNews.newsId
+            ? {
+                ...item,
+                content: editContent.trim() || item.content,
+                images: allImages.length > 0 ? allImages : item.images
+              }
+            : item
+        )
+      )
+      
       handleCloseEditDialog()
+
+      // Broadcast để các tab khác biết tin tức đã được cập nhật
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_UPDATED', newsId: editingNews.newsId, timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể cập nhật tin tức')
       console.error('Error updating news:', err)
@@ -465,6 +604,7 @@ export default function NewsManagement() {
     }
   }
 
+
   // Delete News Handlers
   const handleOpenDeleteDialog = (newsItem: NewsDto) => {
     setDeletingNews(newsItem)
@@ -472,19 +612,35 @@ export default function NewsManagement() {
     handleMenuClose(newsItem.newsId)
   }
 
+
   const handleCloseDeleteDialog = () => {
     setDeleteDialogOpen(false)
     setDeletingNews(null)
   }
 
+
   const handleDeleteNews = async () => {
     if (!deletingNews) return
 
+    const newsIdToDelete = deletingNews.newsId
+
     try {
       setDeleting(true)
-      await deleteNews(deletingNews.newsId)
-      await loadNews()
+      await deleteNews(newsIdToDelete)
+      
+      // Cập nhật state trực tiếp thay vì reload toàn bộ
+      setNews((prev) => prev.filter((item) => item.newsId !== newsIdToDelete))
+      
       handleCloseDeleteDialog()
+
+      // Broadcast để các tab khác biết tin tức đã bị xóa
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_DELETED', newsId: newsIdToDelete, timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể xóa tin tức')
       console.error('Error deleting news:', err)
@@ -492,6 +648,7 @@ export default function NewsManagement() {
       setDeleting(false)
     }
   }
+
 
   // Check if user is authenticated (has token)
   const isAuthenticated = () => {
@@ -503,6 +660,7 @@ export default function NewsManagement() {
     }
   }
 
+
   // Like Handler - chỉ cho phép khi đã đăng nhập
   const handleToggleLike = async (newsId: number) => {
     // Kiểm tra đăng nhập trước khi like
@@ -510,6 +668,7 @@ export default function NewsManagement() {
       setError('Vui lòng đăng nhập để thả tim tin tức')
       return
     }
+
 
     try {
       const result = await toggleLikeNews(newsId)
@@ -520,6 +679,15 @@ export default function NewsManagement() {
             : item
         )
       )
+
+      // Broadcast để các tab khác biết lượt like đã thay đổi
+      try {
+        const newsChannel = new BroadcastChannel('news-updates')
+        newsChannel.postMessage({ type: 'NEWS_LIKED', newsId, likesCount: result.likesCount, timestamp: Date.now() })
+        newsChannel.close()
+      } catch (e) {
+        console.log('BroadcastChannel not supported')
+      }
     } catch (err: any) {
       console.error('Error toggling like:', err)
       const errorMessage = err?.message || 'Không thể thả tim tin tức'
@@ -527,18 +695,22 @@ export default function NewsManagement() {
     }
   }
 
+
   // Menu Handlers
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, newsId: number) => {
     setMenuAnchor((prev) => ({ ...prev, [newsId]: event.currentTarget }))
   }
 
+
   const handleMenuClose = (newsId: number) => {
     setMenuAnchor((prev) => ({ ...prev, [newsId]: null }))
   }
 
+
   // Chỉ có thể edit tin tức của chính mình (kể cả Admin)
   const canEdit = (newsItem: NewsDto) => {
     if (!isAdmin || !currentUser) return false
+
 
     // Check multiple possible user ID fields from currentUser
     const userId =
@@ -550,23 +722,28 @@ export default function NewsManagement() {
       0
     const newsAuthorId = newsItem.authorId ?? 0
 
+
     // Convert to numbers for comparison (handle both string and number)
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
     const authorIdNum =
       typeof newsAuthorId === 'string' ? parseInt(String(newsAuthorId), 10) : Number(newsAuthorId)
 
+
     return userIdNum === authorIdNum && userIdNum > 0
   }
+
 
   // Admin có thể delete bất kỳ tin tức nào
   const canDelete = () => {
     return isAdmin
   }
 
+
   // Helper để kiểm tra có thể edit hoặc delete (dùng cho menu button)
   const canEditOrDelete = (newsItem: NewsDto) => {
     return canEdit(newsItem) || canDelete()
   }
+
 
   if (loading) {
     return (
@@ -575,6 +752,7 @@ export default function NewsManagement() {
       </Box>
     )
   }
+
 
   return (
     <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh' }}>
@@ -637,6 +815,7 @@ export default function NewsManagement() {
         )}
       </Box>
 
+
       {/* Search */}
       <Box mb={3}>
         <TextField
@@ -663,12 +842,14 @@ export default function NewsManagement() {
         />
       </Box>
 
+
       {/* Error Alert */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
+
 
       {/* News List */}
       {filteredNews.length === 0 ? (
@@ -748,6 +929,22 @@ export default function NewsManagement() {
                   )}
                 </Box>
 
+                {/* Title */}
+                {newsItem.title && (
+                  <Typography
+                    variant="h5"
+                    sx={{
+                      mb: 2,
+                      fontWeight: 700,
+                      color: 'text.primary',
+                      fontSize: '1.5rem',
+                      lineHeight: 1.4
+                    }}
+                  >
+                    {newsItem.title}
+                  </Typography>
+                )}
+
                 {/* Content */}
                 <Typography
                   variant="body1"
@@ -762,6 +959,7 @@ export default function NewsManagement() {
                   {newsItem.content}
                 </Typography>
 
+
                 {/* Images */}
                 {newsItem.images && newsItem.images.length > 0 && (
                   <Box mb={2}>
@@ -775,6 +973,7 @@ export default function NewsManagement() {
                         })
                         .map((image, index) => {
                           let imageSrc = image.trim()
+
 
                           // If it's already a data URL or HTTP(S) URL, use as is
                           if (imageSrc.startsWith('data:image/')) {
@@ -793,6 +992,7 @@ export default function NewsManagement() {
                             const base64Pattern = /^[A-Za-z0-9+/=\s]+$/
                             const cleaned = imageSrc.replace(/\s/g, '') // Remove whitespace
 
+
                             if (base64Pattern.test(cleaned) && cleaned.length > 50) {
                               // It's likely base64, add prefix
                               imageSrc = `data:image/jpeg;base64,${cleaned}`
@@ -806,10 +1006,12 @@ export default function NewsManagement() {
                             }
                           }
 
+
                           // Skip if imageSrc is null (invalid)
                           if (!imageSrc) {
                             return null
                           }
+
 
                           return (
                             <ImageListItem key={`${newsItem.newsId}-img-${index}`}>
@@ -839,10 +1041,12 @@ export default function NewsManagement() {
                                   )
                                   console.error('Has base64,:', imageSrc.includes('base64,'))
 
+
                                   // Try alternative: maybe it needs different format
                                   if (imageSrc.includes('base64,')) {
                                     const base64Part = imageSrc.split('base64,')[1]
                                     console.error('Base64 part length:', base64Part?.length)
+
 
                                     if (base64Part && base64Part.length > 50) {
                                       // Try with different image type
@@ -852,6 +1056,7 @@ export default function NewsManagement() {
                                         `data:image/jpg;base64,${base64Part}`,
                                         `data:image/webp;base64,${base64Part}`
                                       ]
+
 
                                       let tried = 0
                                       const tryNext = () => {
@@ -873,6 +1078,7 @@ export default function NewsManagement() {
                                           e.currentTarget.alt = 'Không thể tải ảnh'
                                         }
                                       }
+
 
                                       e.currentTarget.onerror = tryNext
                                       tryNext()
@@ -896,30 +1102,8 @@ export default function NewsManagement() {
                   </Box>
                 )}
 
-                {/* Social Media Link */}
-                {newsItem.socialMediaLink && (
-                  <Box mb={2}>
-                    <Button
-                      startIcon={<LinkIcon />}
-                      href={newsItem.socialMediaLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      size="small"
-                      sx={{
-                        color: 'primary.main',
-                        textTransform: 'none',
-                        '&:hover': {
-                          bgcolor: 'primary.light',
-                          color: 'white'
-                        }
-                      }}
-                    >
-                      Xem thêm
-                    </Button>
-                  </Box>
-                )}
-
                 <Divider sx={{ my: 2, bgcolor: 'grey.200' }} />
+
 
                 {/* Actions */}
                 <Box display="flex" alignItems="center" gap={2}>
@@ -961,6 +1145,7 @@ export default function NewsManagement() {
                 </Box>
               </CardContent>
 
+
               {/* Menu */}
               <Menu
                 anchorEl={menuAnchor[newsItem.newsId]}
@@ -988,6 +1173,7 @@ export default function NewsManagement() {
         </Box>
       )}
 
+
       {/* Create Dialog */}
       <Dialog
         open={createDialogOpen}
@@ -996,19 +1182,88 @@ export default function NewsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: 4,
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 50%, #0d47a1 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(25, 118, 210, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)',
+            }
+          }}
+        >
           Tạo tin tức mới
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
           {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+            <Alert
+              severity="error"
+              sx={{
+                mb: 2.5,
+                mt: 1,
+                borderRadius: 2,
+                boxShadow: '0 4px 12px rgba(211, 47, 47, 0.15)',
+              }}
+              onClose={() => setError(null)}
+            >
               {error}
             </Alert>
           )}
+          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1, mt: 2, color: 'text.primary' }}>
+            Tiêu đề <span style={{ color: '#d32f2f' }}>*</span>
+          </Typography>
+          <TextField
+            fullWidth
+            placeholder="Nhập tiêu đề tin tức..."
+            value={newTitle}
+            onChange={(e) => {
+              setNewTitle(e.target.value)
+              if (error) setError(null)
+            }}
+            sx={{
+              mb: 2.5,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2.5,
+                bgcolor: 'white',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  boxShadow: '0 4px 12px rgba(25, 118, 210, 0.1)',
+                },
+                '&:hover fieldset': {
+                  borderColor: 'primary.main',
+                  borderWidth: 2,
+                },
+                '&.Mui-focused': {
+                  boxShadow: '0 4px 16px rgba(25, 118, 210, 0.2)',
+                },
+                '&.Mui-focused fieldset': {
+                  borderWidth: 2,
+                }
+              }
+            }}
+          />
+          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1, color: 'text.primary' }}>
+            Nội dung <span style={{ color: '#d32f2f' }}>*</span>
+          </Typography>
           <TextField
             fullWidth
             multiline
@@ -1017,43 +1272,35 @@ export default function NewsManagement() {
             value={newContent}
             onChange={(e) => {
               setNewContent(e.target.value)
-              // Clear error when user starts typing
               if (error) setError(null)
             }}
             sx={{
-              mb: 2,
-              mt: 1,
-              bgcolor: 'white',
+              mb: 2.5,
               '& .MuiOutlinedInput-root': {
+                borderRadius: 2.5,
+                bgcolor: 'white',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  boxShadow: '0 4px 12px rgba(25, 118, 210, 0.1)',
+                },
                 '&:hover fieldset': {
-                  borderColor: 'primary.main'
+                  borderColor: 'primary.main',
+                  borderWidth: 2,
+                },
+                '&.Mui-focused': {
+                  boxShadow: '0 4px 16px rgba(25, 118, 210, 0.2)',
+                },
+                '&.Mui-focused fieldset': {
+                  borderWidth: 2,
                 }
               }
             }}
           />
-          <TextField
-            fullWidth
-            placeholder="Link mạng xã hội (tùy chọn)"
-            value={newSocialLink}
-            onChange={(e) => setNewSocialLink(e.target.value)}
-            sx={{
-              mb: 2,
-              bgcolor: 'white',
-              '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'primary.main'
-                }
-              }
-            }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <LinkIcon color="primary" />
-                </InputAdornment>
-              )
-            }}
-          />
-          <Box mb={2}>
+          <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1, color: 'text.primary' }}>
+            Hình ảnh <span style={{ color: '#d32f2f' }}>*</span>
+          </Typography>
+          <Box mb={2.5}>
             <input
               accept="image/*"
               style={{ display: 'none' }}
@@ -1068,12 +1315,21 @@ export default function NewsManagement() {
                 component="span"
                 startIcon={<ImageIcon />}
                 sx={{
+                  borderRadius: 2.5,
+                  borderWidth: 2,
                   borderColor: 'primary.main',
                   color: 'primary.main',
+                  px: 3,
+                  py: 1.2,
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
                   '&:hover': {
+                    borderWidth: 2,
                     borderColor: 'primary.dark',
-                    bgcolor: 'primary.light',
-                    color: 'white'
+                    background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+                    color: 'white',
+                    transform: 'translateY(-2px)',
+                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
                   }
                 }}
               >
@@ -1082,7 +1338,7 @@ export default function NewsManagement() {
             </label>
           </Box>
           {newImagePreviews.length > 0 && (
-            <Box display="flex" flexWrap="wrap" gap={1} mb={2}>
+            <Box display="flex" flexWrap="wrap" gap={1.5} mb={2.5}>
               {newImagePreviews.map((preview, index) => (
                 <Box
                   key={index}
@@ -1090,10 +1346,16 @@ export default function NewsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: 3,
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'primary.light'
+                    border: '3px solid',
+                    borderColor: 'primary.light',
+                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(25, 118, 210, 0.25)',
+                    }
                   }}
                 >
                   <img
@@ -1110,13 +1372,17 @@ export default function NewsManagement() {
                     onClick={() => removeNewImage(index)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
+                      top: 6,
+                      right: 6,
                       bgcolor: 'error.main',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(211, 47, 47, 0.4)',
                       '&:hover': {
                         bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(211, 47, 47, 0.5)',
                       }
                     }}
                   >
@@ -1127,21 +1393,52 @@ export default function NewsManagement() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseCreateDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions
+          sx={{
+            bgcolor: 'transparent',
+            px: 3,
+            pb: 3,
+            pt: 1,
+            gap: 1.5,
+          }}
+        >
+          <Button
+            onClick={handleCloseCreateDialog}
+            sx={{
+              color: 'text.secondary',
+              borderRadius: 2.5,
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'grey.100',
+                color: 'text.primary',
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
             onClick={handleCreateNews}
             variant="contained"
-            disabled={creating || !newContent.trim()}
+            disabled={creating || !newTitle.trim() || !newContent.trim() || newImages.length === 0}
             sx={{
-              bgcolor: 'primary.main',
+              borderRadius: 2.5,
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+              boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'primary.dark'
+                background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(25, 118, 210, 0.4)',
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%)',
+                boxShadow: 'none',
               }
             }}
           >
@@ -1149,6 +1446,7 @@ export default function NewsManagement() {
           </Button>
         </DialogActions>
       </Dialog>
+
 
       {/* Edit Dialog */}
       <Dialog
@@ -1158,14 +1456,37 @@ export default function NewsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: 4,
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'secondary.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 50%, #6a1b9a 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(156, 39, 176, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)',
+            }
+          }}
+        >
           Chỉnh sửa tin tức
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
           <TextField
             fullWidth
             multiline
@@ -1174,39 +1495,30 @@ export default function NewsManagement() {
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             sx={{
-              mb: 2,
-              mt: 1,
-              bgcolor: 'white',
+              mb: 2.5,
+              mt: 2,
               '& .MuiOutlinedInput-root': {
+                borderRadius: 2.5,
+                bgcolor: 'white',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  boxShadow: '0 4px 12px rgba(156, 39, 176, 0.1)',
+                },
                 '&:hover fieldset': {
-                  borderColor: 'secondary.main'
+                  borderColor: 'secondary.main',
+                  borderWidth: 2,
+                },
+                '&.Mui-focused': {
+                  boxShadow: '0 4px 16px rgba(156, 39, 176, 0.2)',
+                },
+                '&.Mui-focused fieldset': {
+                  borderWidth: 2,
                 }
               }
             }}
           />
-          <TextField
-            fullWidth
-            placeholder="Link mạng xã hội (tùy chọn)"
-            value={editSocialLink}
-            onChange={(e) => setEditSocialLink(e.target.value)}
-            sx={{
-              mb: 2,
-              bgcolor: 'white',
-              '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'secondary.main'
-                }
-              }
-            }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <LinkIcon color="secondary" />
-                </InputAdornment>
-              )
-            }}
-          />
-          <Box mb={2}>
+          <Box mb={2.5}>
             <input
               accept="image/*"
               style={{ display: 'none' }}
@@ -1221,12 +1533,21 @@ export default function NewsManagement() {
                 component="span"
                 startIcon={<ImageIcon />}
                 sx={{
+                  borderRadius: 2.5,
+                  borderWidth: 2,
                   borderColor: 'secondary.main',
                   color: 'secondary.main',
+                  px: 3,
+                  py: 1.2,
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
                   '&:hover': {
+                    borderWidth: 2,
                     borderColor: 'secondary.dark',
-                    bgcolor: 'secondary.light',
-                    color: 'white'
+                    background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+                    color: 'white',
+                    transform: 'translateY(-2px)',
+                    boxShadow: '0 4px 12px rgba(156, 39, 176, 0.3)',
                   }
                 }}
               >
@@ -1235,7 +1556,7 @@ export default function NewsManagement() {
             </label>
           </Box>
           {(editImages.length > 0 || editNewImagePreviews.length > 0) && (
-            <Box display="flex" flexWrap="wrap" gap={1} mb={2}>
+            <Box display="flex" flexWrap="wrap" gap={1.5} mb={2.5}>
               {editImages.map((image, index) => (
                 <Box
                   key={`existing-${index}`}
@@ -1243,10 +1564,16 @@ export default function NewsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: 3,
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'secondary.light'
+                    border: '3px solid',
+                    borderColor: 'secondary.light',
+                    boxShadow: '0 4px 12px rgba(156, 39, 176, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(156, 39, 176, 0.25)',
+                    }
                   }}
                 >
                   <img
@@ -1263,13 +1590,17 @@ export default function NewsManagement() {
                     onClick={() => removeEditImage(index, false)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
+                      top: 6,
+                      right: 6,
                       bgcolor: 'error.main',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(211, 47, 47, 0.4)',
                       '&:hover': {
                         bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(211, 47, 47, 0.5)',
                       }
                     }}
                   >
@@ -1284,10 +1615,16 @@ export default function NewsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: 3,
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'primary.light'
+                    border: '3px solid',
+                    borderColor: 'primary.light',
+                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(25, 118, 210, 0.25)',
+                    }
                   }}
                 >
                   <img
@@ -1304,13 +1641,17 @@ export default function NewsManagement() {
                     onClick={() => removeEditImage(index, true)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
+                      top: 6,
+                      right: 6,
                       bgcolor: 'error.main',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(211, 47, 47, 0.4)',
                       '&:hover': {
                         bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(211, 47, 47, 0.5)',
                       }
                     }}
                   >
@@ -1321,8 +1662,30 @@ export default function NewsManagement() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseEditDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions
+          sx={{
+            bgcolor: 'transparent',
+            px: 3,
+            pb: 3,
+            pt: 1,
+            gap: 1.5,
+          }}
+        >
+          <Button
+            onClick={handleCloseEditDialog}
+            sx={{
+              color: 'text.secondary',
+              borderRadius: 2.5,
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'grey.100',
+                color: 'text.primary',
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -1333,12 +1696,21 @@ export default function NewsManagement() {
               (!editContent.trim() && editImages.length === 0 && editNewImages.length === 0)
             }
             sx={{
-              bgcolor: 'secondary.main',
+              borderRadius: 2.5,
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)',
+              boxShadow: '0 4px 12px rgba(156, 39, 176, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'secondary.dark'
+                background: 'linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(156, 39, 176, 0.4)',
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%)',
+                boxShadow: 'none',
               }
             }}
           >
@@ -1347,26 +1719,84 @@ export default function NewsManagement() {
         </DialogActions>
       </Dialog>
 
+
       {/* Delete Dialog */}
       <Dialog
         open={deleteDialogOpen}
         onClose={handleCloseDeleteDialog}
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: 4,
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #fef2f2 100%)',
+            minWidth: 400,
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)',
+            }
+          }}
+        >
           Xác nhận xóa
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
-          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem' }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
+          <DialogContentText
+            sx={{
+              color: 'text.primary',
+              fontSize: '1rem',
+              lineHeight: 1.6,
+              p: 2,
+              mt: 1,
+              bgcolor: 'rgba(239, 68, 68, 0.05)',
+              borderRadius: 2,
+              border: '1px solid rgba(239, 68, 68, 0.1)',
+            }}
+          >
             Bạn có chắc chắn muốn xóa tin tức này? Hành động này không thể hoàn tác.
           </DialogContentText>
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseDeleteDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions
+          sx={{
+            bgcolor: 'transparent',
+            px: 3,
+            pb: 3,
+            pt: 1,
+            gap: 1.5,
+          }}
+        >
+          <Button
+            onClick={handleCloseDeleteDialog}
+            sx={{
+              color: 'text.secondary',
+              borderRadius: 2.5,
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'grey.100',
+                color: 'text.primary',
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -1374,12 +1804,21 @@ export default function NewsManagement() {
             variant="contained"
             disabled={deleting}
             sx={{
-              bgcolor: 'error.main',
+              borderRadius: 2.5,
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'error.dark'
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(239, 68, 68, 0.4)',
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%)',
+                boxShadow: 'none',
               }
             }}
           >
@@ -1390,3 +1829,7 @@ export default function NewsManagement() {
     </Box>
   )
 }
+
+
+
+

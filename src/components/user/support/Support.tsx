@@ -5,6 +5,16 @@ import AdminChat from './AdminChat'
 import AIChatbot from './AIChatbot'
 import axiosInstance from '~/utils/axiosInstance'
 
+
+// Interface cho event mở chat với user cụ thể
+interface OpenChatWithUserEvent extends CustomEvent {
+  detail: {
+    userId: string | number;
+    userName?: string;
+  }
+}
+
+
 // Helper function để check Admin ngay lập tức (không cần state)
 const checkIsAdminUser = (): boolean => {
   try {
@@ -19,6 +29,7 @@ const checkIsAdminUser = (): boolean => {
   }
 }
 
+
 // Helper function để check đăng nhập - kiểm tra cả token và userInfo
 const checkIsLoggedIn = (): boolean => {
   const token = localStorage.getItem('token') || sessionStorage.getItem('token')
@@ -26,6 +37,7 @@ const checkIsLoggedIn = (): boolean => {
   // Chỉ cần có 1 trong 2 là đủ để coi như đã đăng nhập
   return !!(token || userInfo)
 }
+
 
 const Support: React.FC = () => {
   const [showSupportModal, setShowSupportModal] = useState(false)
@@ -38,39 +50,66 @@ const Support: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(() => checkIsAdminUser())
   // Sử dụng ref để ngăn click liên tục (không gây re-render)
   const isProcessingClickRef = useRef(false)
+  // State để lưu user cần mở chat (từ event bên ngoài)
+  const [initialChatUserId, setInitialChatUserId] = useState<string | null>(null)
+
+
+  // Lắng nghe event mở chat với user cụ thể
+  useEffect(() => {
+    const handleOpenChatWithUser = (event: Event) => {
+      const customEvent = event as OpenChatWithUserEvent
+      const { userId } = customEvent.detail
+      if (userId) {
+        setInitialChatUserId(String(userId))
+        setShowSupportModal(false)
+        setShowAIChatbot(false)
+        setShowAdminChat(true)
+      }
+    }
+
+
+    window.addEventListener('openChatWithUser', handleOpenChatWithUser)
+    return () => {
+      window.removeEventListener('openChatWithUser', handleOpenChatWithUser)
+    }
+  }, [])
+
 
   // Check login status periodically (để detect login/logout)
   useEffect(() => {
     const checkAuthStatus = () => {
       const newIsLoggedIn = checkIsLoggedIn()
       const newIsAdmin = checkIsAdminUser()
-      
+     
       setIsLoggedIn(prev => prev !== newIsLoggedIn ? newIsLoggedIn : prev)
       setIsAdmin(prev => prev !== newIsAdmin ? newIsAdmin : prev)
     }
 
+
     // Check ngay khi mount
     checkAuthStatus()
 
+
     // Check mỗi 1 giây để detect login/logout nhanh hơn
     const interval = setInterval(checkAuthStatus, 1000)
-    
+   
     // Listen for storage changes (khi login/logout ở tab khác)
     const handleStorageChange = () => {
       checkAuthStatus()
     }
     window.addEventListener('storage', handleStorageChange)
-    
+   
     return () => {
       clearInterval(interval)
       window.removeEventListener('storage', handleStorageChange)
     }
   }, [])
 
+
   const fetchUnreadCount = useCallback(async () => {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token')
     if (!token) return
-    
+   
     try {
       const response = await axiosInstance.get('/chat/UnreadCount')
       const newCount = response.data?.count || 0
@@ -81,9 +120,11 @@ const Support: React.FC = () => {
     }
   }, [])
 
+
   useEffect(() => {
     // Nếu không đăng nhập hoặc là Admin, không cần làm gì
     if (!isLoggedIn || isAdmin) return
+
 
     // Get user info from localStorage/sessionStorage
     const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
@@ -99,13 +140,16 @@ const Support: React.FC = () => {
       }
     }
 
+
     // Fetch unread count on mount
     fetchUnreadCount()
+
 
     // Poll for unread count every 30 seconds
     const interval = setInterval(fetchUnreadCount, 30000)
     return () => clearInterval(interval)
   }, [fetchUnreadCount, isLoggedIn, isAdmin])
+
 
   const getRoleName = (user: any): string => {
     if (user.Role?.Name || user.role?.name) {
@@ -128,14 +172,15 @@ const Support: React.FC = () => {
     return 'Du khách'
   }
 
+
   const handleChatButtonClick = useCallback(() => {
     // Ngăn click liên tục bằng ref (không gây re-render)
     if (isProcessingClickRef.current) {
       return
     }
-    
+   
     isProcessingClickRef.current = true
-    
+   
     // Nếu có bất kỳ modal nào đang mở, đóng tất cả
     if (showAdminChat || showAIChatbot || showSupportModal) {
       setShowAdminChat(false)
@@ -145,44 +190,52 @@ const Support: React.FC = () => {
       // Mở SupportModal
       setShowSupportModal(true)
     }
-    
+   
     // Reset flag sau 500ms
     setTimeout(() => {
       isProcessingClickRef.current = false
     }, 500)
   }, [showAdminChat, showAIChatbot, showSupportModal])
 
+
   const handleCloseSupportModal = () => {
     setShowSupportModal(false)
   }
+
 
   const handleSelectAdminChat = () => {
     setShowSupportModal(false)
     setShowAdminChat(true)
   }
 
+
   const handleSelectAIChat = () => {
     setShowSupportModal(false)
     setShowAIChatbot(true)
   }
+
 
   const handleBackFromAdminChat = () => {
     setShowAdminChat(false)
     setShowSupportModal(true)
   }
 
+
   const handleBackFromAIChatbot = () => {
     setShowAIChatbot(false)
     setShowSupportModal(true)
   }
 
+
   const handleCloseAdminChat = () => {
     setShowAdminChat(false)
   }
 
+
   const handleCloseAIChatbot = () => {
     setShowAIChatbot(false)
   }
+
 
   // Refresh unread count when chat is closed
   const handleCloseAdminChatWithRefresh = () => {
@@ -190,12 +243,14 @@ const Support: React.FC = () => {
     fetchUnreadCount()
   }
 
+
   // Ẩn Support chat widget khi:
   // 1. Chưa đăng nhập
   // 2. Đăng nhập bằng tài khoản Admin (Admin đã có mục Chat riêng)
   if (!isLoggedIn) {
     return null  // Chỉ ẩn nếu: chưa đăng nhập
   }
+
 
   return (
     <>
@@ -213,6 +268,8 @@ const Support: React.FC = () => {
         userName={userInfo.name}
         userRole={userInfo.role}
         onRefreshUnread={fetchUnreadCount}
+        initialUserId={initialChatUserId}
+        onInitialUserHandled={() => setInitialChatUserId(null)}
       />
       <AIChatbot
         isOpen={showAIChatbot}
@@ -223,7 +280,17 @@ const Support: React.FC = () => {
   )
 }
 
+
 export default Support
+
+
+
+
+
+
+
+
+
 
 
 

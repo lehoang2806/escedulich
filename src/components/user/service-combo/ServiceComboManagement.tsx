@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo, useRef } from 'react';
 import Button from '../ui/Button';
 import LoadingSpinner from '../LoadingSpinner';
 import { GridIcon } from '../icons/index';
@@ -125,6 +125,9 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
   
   const DEFAULT_IMAGE_URL = '/img/banahills.jpg';
 
+  // Ref to skip page reset when updating items (optimistic update)
+  const skipPageResetRef = useRef(false);
+
   // Enrich coupons: /Coupon/host/{id} sometimes returns a slim shape (missing RequiredLevel/TargetAudience).
   // Option B: fetch each coupon detail via /Coupon/{id} and merge extra fields.
   const enrichCouponsWithDetails = useCallback(async (coupons: any[]) => {
@@ -248,14 +251,20 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
     };
 
     loadServiceCombos();
-  }, [getUserId, onError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getUserId]); // Loại bỏ onError khỏi dependencies để tránh reload khi parent re-render
 
   // Apply filters when filter values change
   useEffect(() => {
     const filtered = applyServiceComboFilters(serviceCombos, serviceComboFilterName, serviceComboFilterStatus, serviceComboSortOrder);
     setFilteredServiceCombos(filtered);
-    setServiceComboCurrentPage(1);
-    setServiceComboPageInput('');
+    // Only reset page when filter values change, not when items are updated
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+    } else {
+      setServiceComboCurrentPage(1);
+      setServiceComboPageInput('');
+    }
   }, [serviceComboFilterName, serviceComboFilterStatus, serviceComboSortOrder, serviceCombos, applyServiceComboFilters]);
 
   // Calculate combo-pagination values using useMemo - with safe defaults
@@ -303,6 +312,8 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
     setIsDeleting(true);
     try {
       await axiosInstance.delete(`${API_ENDPOINTS.SERVICE_COMBO}/${pendingDeleteComboId}`);
+      // Skip page reset when deleting items (optimistic update)
+      skipPageResetRef.current = true;
       setServiceCombos(prevCombos => prevCombos.filter(s => (s.Id || s.id) !== pendingDeleteComboId));
       setFilteredServiceCombos(prevFiltered => prevFiltered.filter(s => (s.Id || s.id) !== pendingDeleteComboId));
       if (onSuccess) {
@@ -539,7 +550,7 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
     e.preventDefault();
     
     // Validate required fields
-    const newErrors: { name?: string; address?: string; price?: string; availableSlots?: string } = {};
+    const newErrors: { name?: string; address?: string; price?: string; availableSlots?: string; images?: string } = {};
     if (!createServiceComboFormData.name || createServiceComboFormData.name.trim() === '') {
       newErrors.name = 'Tên combo dịch vụ không được để trống';
     }
@@ -551,6 +562,9 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
     }
     if (!createServiceComboFormData.availableSlots || isNaN(parseInt(createServiceComboFormData.availableSlots)) || parseInt(createServiceComboFormData.availableSlots) < 1) {
       newErrors.availableSlots = 'Số chỗ trống phải là số nguyên >= 1';
+    }
+    if (!createServiceComboFormData.images || createServiceComboFormData.images.length === 0) {
+      newErrors.images = 'Vui lòng upload ít nhất 1 hình ảnh';
     }
     
     if (Object.keys(newErrors).length > 0) {
@@ -1270,6 +1284,8 @@ const ServiceComboManagement = forwardRef<ServiceComboManagementRef, ServiceComb
         return sc;
       });
       
+      // Skip page reset when updating items (optimistic update)
+      skipPageResetRef.current = true;
       setServiceCombos(updatedCombos);
       const filtered = applyServiceComboFilters(updatedCombos, serviceComboFilterName, serviceComboFilterStatus, serviceComboSortOrder);
       setFilteredServiceCombos(filtered);

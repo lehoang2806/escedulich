@@ -15,18 +15,6 @@
   border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
-/* top accent */
-.reg-card::before {
-  content: '';
-  display: block;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: #17a34a;
-  border-radius: 16px 16px 0 0;
-}
 .brand {
   text-align: center;
   margin-bottom: 8px;

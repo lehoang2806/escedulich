@@ -68,14 +68,25 @@ const NewsDetailPage = () => {
       
       // Transform backend NewsDto to frontend NewsItem
       const newsData = response.data
-      const content = newsData.Content || newsData.content || ''
+      const rawContent = newsData.Content || newsData.content || ''
       const images = newsData.Images || newsData.images || []
       const firstImage = images.length > 0 ? images[0] : defaultNewsImage
+      
+      // Tách title từ content nếu có format [TITLE]...[/TITLE]
+      let title = ''
+      let content = rawContent
+      
+      const titleMatch = rawContent.match(/^\[TITLE\](.*?)\[\/TITLE\]\n?(.*)$/s)
+      if (titleMatch) {
+        title = titleMatch[1].trim()
+        content = titleMatch[2].trim()
+      }
+      
       const summary = content.length > 200 ? content.substring(0, 200) + '...' : content
       
       const transformedNews: NewsItem = {
         id: newsData.NewsId || newsData.newsId || newsData.id,
-        title: content, // Backend Content is actually the title/content
+        title: title,
         content: content,
         summary: summary,
         image: firstImage,
@@ -108,14 +119,25 @@ const NewsDetailPage = () => {
       
       // Transform backend NewsDto to frontend NewsItem
       const transformedNews: NewsItem[] = (response.data || []).map((news: any) => {
-        const content = news.Content || news.content || ''
+        const rawContent = news.Content || news.content || ''
         const images = news.Images || news.images || []
         const firstImage = images.length > 0 ? images[0] : defaultNewsImage
+        
+        // Tách title từ content nếu có format [TITLE]...[/TITLE]
+        let title = ''
+        let content = rawContent
+        
+        const titleMatch = rawContent.match(/^\[TITLE\](.*?)\[\/TITLE\]\n?(.*)$/s)
+        if (titleMatch) {
+          title = titleMatch[1].trim()
+          content = titleMatch[2].trim()
+        }
+        
         const summary = content.length > 200 ? content.substring(0, 200) + '...' : content
         
         return {
           id: news.NewsId || news.newsId || news.id,
-          title: content,
+          title: title,
           content: content,
           summary: summary,
           image: firstImage,

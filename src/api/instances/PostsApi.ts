@@ -4,6 +4,7 @@ export interface PostLikeDto {
   postLikeId: string
   accountId: string
   fullName: string
+  avatar?: string
   createdDate: string
   reactionType?: string
 }
@@ -177,7 +178,25 @@ const normalizePost = (payload: any): PostDto => {
   const likesArray = payload?.likes ?? payload?.Likes
   const commentsArray = payload?.comments ?? payload?.Comments
   const likesCount = Array.isArray(likesArray) ? likesArray.length : (payload?.likesCount ?? payload?.LikesCount ?? 0)
-  const commentsCount = Array.isArray(commentsArray) ? commentsArray.length : (payload?.commentsCount ?? payload?.CommentsCount ?? 0)
+  
+  // Helper function để đếm tổng comments bao gồm cả replies (đệ quy)
+  const countTotalCommentsWithReplies = (comments: any[]): number => {
+    if (!Array.isArray(comments)) return 0
+    let total = 0
+    for (const comment of comments) {
+      total += 1 // Đếm comment hiện tại
+      const replies = comment?.replies ?? comment?.Replies
+      if (Array.isArray(replies) && replies.length > 0) {
+        total += countTotalCommentsWithReplies(replies) // Đếm replies đệ quy
+      }
+    }
+    return total
+  }
+  
+  // Đếm tổng comments bao gồm cả replies
+  const commentsCount = Array.isArray(commentsArray) 
+    ? countTotalCommentsWithReplies(commentsArray) 
+    : (payload?.commentsCount ?? payload?.CommentsCount ?? 0)
   
   // Parse likes array - map reactionType từ ReactionTypeId hoặc ReactionTypeName
   const likes: PostLikeDto[] = Array.isArray(likesArray)
@@ -216,6 +235,7 @@ const normalizePost = (payload: any): PostDto => {
           postLikeId: String(like?.postLikeId ?? like?.PostLikeId ?? like?.id ?? like?.Id ?? ''),
           accountId: String(like?.accountId ?? like?.AccountId ?? like?.userId ?? like?.UserId ?? ''),
           fullName: like?.fullName ?? like?.FullName ?? like?.name ?? like?.Name ?? 'Người dùng',
+          avatar: like?.avatar ?? like?.Avatar ?? null,
           createdDate: like?.createdDate ?? like?.CreatedDate ?? like?.createdAt ?? like?.CreatedAt ?? new Date().toISOString(),
           reactionType: reactionType
         }

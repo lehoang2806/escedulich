@@ -2,14 +2,13 @@ import { useEffect, useState, useMemo } from 'react'
 import Box from '@mui/material/Box'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
-import ActivityCard from '~/components/common/ActivityCard'
 import QuickStatic from '~/components/common/QuickStaticCard'
-import { 
-  fetchDashboardData, 
+import {
+  fetchDashboardData,
   fetchTimeSeriesData,
   fetchTopSpenders,
   fetchTopHosts,
-  type DashboardDto, 
+  type DashboardDto,
   type TimeSeriesDto,
   type TopSpenderDto,
   type TopHostDto
@@ -26,6 +25,8 @@ import {
 } from 'recharts'
 
 
+
+
 // Format currency helper
 const formatCurrency = (value: number): string => {
   if (value >= 1_000_000_000) {
@@ -37,6 +38,7 @@ const formatCurrency = (value: number): string => {
   return `${value.toLocaleString('vi-VN')} VNĐ`
 }
 
+
 export default function MainDashBoardContent() {
   const [dashboardData, setDashboardData] = useState<DashboardDto | null>(null)
   const [dailyTimeSeriesData, setDailyTimeSeriesData] = useState<TimeSeriesDto>({ period: 'day', startDate: '', endDate: '', data: [] })
@@ -44,10 +46,11 @@ export default function MainDashBoardContent() {
   const [topHosts, setTopHosts] = useState<TopHostDto[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  
+ 
   // Filter by month and year
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear())
+
 
   // Load dashboard data on mount
   useEffect(() => {
@@ -55,28 +58,31 @@ export default function MainDashBoardContent() {
       try {
         setLoading(true)
         setError(null)
-        
+       
         // Load dashboard statistics
         const data = await fetchDashboardData('day')
         console.log('Dashboard main data loaded:', data)
         setDashboardData(data)
 
-        // Load top spenders and hosts (separate try-catch to not affect charts)
-        try {
-          const spendersData = await fetchTopSpenders(6)
-          console.log('Top spenders loaded:', spendersData)
-          setTopSpenders(spendersData)
-        } catch (spendersError) {
-          console.warn('Top spenders API failed:', spendersError)
-        }
 
-        try {
-          const hostsData = await fetchTopHosts(6)
-          console.log('Top hosts loaded:', hostsData)
-          setTopHosts(hostsData)
-        } catch (hostsError) {
-          console.warn('Top hosts API failed:', hostsError)
-        }
+        // Load top spenders and top hosts from statistics API
+        // Backend API already filters by Status == "completed"
+        const [spendersData, hostsData] = await Promise.all([
+          fetchTopSpenders(6).catch((err) => {
+            console.warn('Failed to fetch top spenders:', err)
+            return []
+          }),
+          fetchTopHosts(6).catch((err) => {
+            console.warn('Failed to fetch top hosts:', err)
+            return []
+          })
+        ])
+       
+        console.log('Top spenders from API (completed bookings only):', spendersData)
+        console.log('Top hosts from API (completed bookings only):', hostsData)
+       
+        setTopSpenders(spendersData)
+        setTopHosts(hostsData)
       } catch (error) {
         console.error('Error loading dashboard:', error)
         setError(error instanceof Error ? error.message : 'Không thể tải dữ liệu')
@@ -87,6 +93,7 @@ export default function MainDashBoardContent() {
     loadDashboard()
   }, [])
 
+
   // Load time series data when month/year changes
   useEffect(() => {
     const loadTimeSeriesData = async () => {
@@ -95,9 +102,9 @@ export default function MainDashBoardContent() {
         const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`
         const lastDay = new Date(selectedYear, selectedMonth, 0).getDate()
         const endDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${lastDay}`
-        
+       
         console.log(`Loading time series for ${startDate} to ${endDate}`)
-        
+       
         const monthlyData = await fetchTimeSeriesData('month', startDate, endDate)
         console.log('Monthly time series data loaded:', monthlyData)
         setDailyTimeSeriesData(monthlyData)
@@ -108,6 +115,7 @@ export default function MainDashBoardContent() {
     loadTimeSeriesData()
   }, [selectedMonth, selectedYear])
 
+
   // Prepare chart data - MUST be before any conditional returns
   const chartData = useMemo(() => {
     return dailyTimeSeriesData.data.map((item) => ({
@@ -115,6 +123,7 @@ export default function MainDashBoardContent() {
       revenue: Number(item.revenue) || 0
     }))
   }, [dailyTimeSeriesData])
+
 
   if (loading) {
     return (
@@ -149,6 +158,7 @@ export default function MainDashBoardContent() {
     )
   }
 
+
   if (!dashboardData) {
     return (
       <Box className="flex flex-col gap-[2.4rem] p-[2.4rem]">
@@ -159,8 +169,10 @@ export default function MainDashBoardContent() {
     )
   }
 
+
   // Color palette for ranking
   const colorPalette = ['bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-lime-500']
+
 
   // Top Host có doanh thu cao nhất (QuickStatic)
   const topHostsFeeds = topHosts.length > 0
@@ -171,25 +183,28 @@ export default function MainDashBoardContent() {
       }))
     : [{ title: 'Chưa có dữ liệu', value: '0 VNĐ', valueClassName: 'bg-gray-400' }]
 
-  const quickStaticConfig = {
+
+  const quickStaticHostConfig = {
     title: 'Top Host có doanh thu cao nhất',
     data: topHostsFeeds
   }
 
-  // Top Users có chi tiêu cao nhất (ActivityCard)
+
+  // Top Users có chi tiêu cao nhất (QuickStatic - same style as Top Host)
   const topSpendersFeeds = topSpenders.length > 0
     ? topSpenders.map((spender, index) => ({
-        desc: `${spender.userName} - ${formatCurrency(spender.totalSpent)}`,
-        time: `${spender.bookingCount} đơn đặt tour`,
-        markColorClassName: colorPalette[index % colorPalette.length]
+        title: spender.userName || 'Unknown User',
+        value: formatCurrency(spender.totalSpent),
+        valueClassName: colorPalette[index % colorPalette.length]
       }))
-    : [{ desc: 'Chưa có dữ liệu', time: '', markColorClassName: 'bg-gray-400' }]
+    : [{ title: 'Chưa có dữ liệu', value: '0 VNĐ', valueClassName: 'bg-gray-400' }]
 
-  const activityConfig = {
-    data: topSpendersFeeds,
+
+  const quickStaticUserConfig = {
     title: 'Top User có chi tiêu cao nhất',
-    bgClassName: 'bg-white'
+    data: topSpendersFeeds
   }
+
 
   return (
     <Box className="flex flex-col gap-[2.4rem]">
@@ -247,9 +262,9 @@ export default function MainDashBoardContent() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis 
-                  dataKey="label" 
-                  tick={{ fontSize: 11 }} 
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11 }}
                   interval={2}
                   tickMargin={8}
                 />
@@ -261,9 +276,9 @@ export default function MainDashBoardContent() {
                 <Tooltip
                   formatter={(value: number) => [`${value.toLocaleString('vi-VN')} VNĐ`, 'Doanh thu']}
                   labelFormatter={(label) => label}
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                    border: 'none', 
+                  contentStyle={{
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    border: 'none',
                     borderRadius: '8px',
                     color: '#fff'
                   }}
@@ -284,10 +299,11 @@ export default function MainDashBoardContent() {
         </Paper>
       </Box>
 
-      {/* Hàng 2: Hoạt động & Thống kê nhanh */}
+
+      {/* Hàng 2: Top User & Top Host */}
       <Box className="grid grid-cols-2 p-[2.4rem] gap-x-[2.4rem]">
-        <ActivityCard {...(activityConfig as any)} />
-        <QuickStatic {...(quickStaticConfig as any)} />
+        <QuickStatic {...(quickStaticUserConfig as any)} />
+        <QuickStatic {...(quickStaticHostConfig as any)} />
       </Box>
     </Box>
   )

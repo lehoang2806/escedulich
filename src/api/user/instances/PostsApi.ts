@@ -6,6 +6,7 @@ export interface PostLikeDto {
   postLikeId: string
   accountId: string
   fullName: string
+  avatar?: string
   createdDate: string
   reactionType?: string
 }
@@ -145,7 +146,24 @@ const normalizePost = (payload: any): PostDto => {
   const likesArray = payload?.likes ?? payload?.Likes
   const commentsArray = payload?.comments ?? payload?.Comments
   const likesCount = Array.isArray(likesArray) ? likesArray.length : (payload?.likesCount ?? payload?.LikesCount ?? 0)
-  const commentsCount = Array.isArray(commentsArray) ? commentsArray.length : (payload?.commentsCount ?? payload?.CommentsCount ?? 0)
+  
+  // Helper function để đếm tổng comments bao gồm cả replies (đệ quy)
+  const countTotalCommentsWithReplies = (comments: any[]): number => {
+    if (!Array.isArray(comments)) return 0
+    let total = 0
+    for (const comment of comments) {
+      total += 1
+      const replies = comment?.replies ?? comment?.Replies
+      if (Array.isArray(replies) && replies.length > 0) {
+        total += countTotalCommentsWithReplies(replies)
+      }
+    }
+    return total
+  }
+  
+  const commentsCount = Array.isArray(commentsArray) 
+    ? countTotalCommentsWithReplies(commentsArray) 
+    : (payload?.commentsCount ?? payload?.CommentsCount ?? 0)
   
   // Parse likes array
   const likes: PostLikeDto[] = Array.isArray(likesArray)
@@ -167,6 +185,7 @@ const normalizePost = (payload: any): PostDto => {
           postLikeId: String(like?.postLikeId ?? like?.PostLikeId ?? ''),
           accountId: String(like?.accountId ?? like?.AccountId ?? ''),
           fullName: like?.fullName ?? like?.FullName ?? 'Người dùng',
+          avatar: like?.avatar ?? like?.Avatar ?? null,
           createdDate: like?.createdDate ?? like?.CreatedDate ?? new Date().toISOString(),
           reactionType
         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from 'react';
 import Button from '../ui/Button';
 import LoadingSpinner from '../LoadingSpinner';
 import { GridIcon } from '../icons/index';
@@ -56,6 +56,9 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
   const [deletingServiceName, setDeletingServiceName] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Ref để skip page reset khi update/delete
+  const skipPageResetRef = useRef(false);
+
   // Filter and sort function for services
   const applyServiceFilters = (serviceList, nameFilter, order) => {
     let filtered = [...serviceList];
@@ -99,7 +102,7 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
     }
   }, []);
 
-  // Load services from API
+  // Load services from API - chỉ load 1 lần khi mount
   useEffect(() => {
     const loadServices = async () => {
       try {
@@ -142,7 +145,22 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
     };
 
     loadServices();
-  }, [filterName, sortOrder, getUserId, onError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getUserId]); // Chỉ load khi mount, không phụ thuộc vào filter
+
+  // Apply filters khi filterName hoặc sortOrder thay đổi (không gọi API)
+  useEffect(() => {
+    if (services.length > 0) {
+      const filtered = applyServiceFilters(services, filterName, sortOrder);
+      setFilteredServices(filtered);
+      // Chỉ reset page nếu không phải do update/delete
+      if (!skipPageResetRef.current) {
+        setServiceCurrentPage(1);
+        setServicePageInput('');
+      }
+      skipPageResetRef.current = false;
+    }
+  }, [filterName, sortOrder, services]);
 
   // Handle service search
   const handleServiceSearch = () => {
@@ -186,6 +204,10 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
       }
       
       await axiosInstance.delete(`${API_ENDPOINTS.SERVICE}/${deletingServiceId}`);
+      
+      // Skip page reset khi delete
+      skipPageResetRef.current = true;
+      
       setServices(prevServices => prevServices.filter(s => (s.Id || s.id) !== deletingServiceId));
       setFilteredServices(prevFiltered => prevFiltered.filter(s => (s.Id || s.id) !== deletingServiceId));
       if (onSuccess) onSuccess('Dịch vụ đã được xóa thành công!');
@@ -374,6 +396,9 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
       const response = await axiosInstance.put(`${API_ENDPOINTS.SERVICE}/${editingServiceId}`, formData);
       const updatedService = response.data;
       
+      // Skip page reset khi edit
+      skipPageResetRef.current = true;
+      
       // Update services
       setServices(prevServices => 
         prevServices.map(s => {
@@ -385,14 +410,14 @@ const ServicesManagement = forwardRef<ServicesManagementRef, ServicesManagementP
       );
       
       // Update filtered services
-      const updatedServices = services.map(s => {
-        if ((s.Id || s.id) === editingServiceId) {
-          return updatedService;
-        }
-        return s;
-      });
-      const filtered = applyServiceFilters(updatedServices, filterName, sortOrder);
-      setFilteredServices(filtered);
+      setFilteredServices(prevFiltered => 
+        prevFiltered.map(s => {
+          if ((s.Id || s.id) === editingServiceId) {
+            return updatedService;
+          }
+          return s;
+        })
+      );
       
       if (onSuccess) onSuccess('Dịch vụ đã được cập nhật thành công!');
       handleCloseEditServiceModal();

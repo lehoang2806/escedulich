@@ -108,21 +108,30 @@ const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ isOpen, onC
   }, [unreadCount, onUnreadCountChange])
 
 
-  // Format ngày tháng
+  // Format ngày tháng - backend lưu UTC time (DateTime.UtcNow)
   const formatDate = (dateString?: string) => {
     if (!dateString) return ''
     try {
-      const date = new Date(dateString)
+      // Backend lưu UTC time nhưng trả về không có 'Z' suffix
+      // Cần thêm 'Z' để JavaScript parse đúng là UTC
+      let utcDateString = dateString
+      if (!dateString.endsWith('Z') && !dateString.includes('+') && !dateString.includes('-', 10)) {
+        utcDateString = dateString + 'Z'
+      }
+      
+      const date = new Date(utcDateString)
       const now = new Date()
       const diffMs = now.getTime() - date.getTime()
       const diffMins = Math.floor(diffMs / 60000)
       const diffHours = Math.floor(diffMs / 3600000)
       const diffDays = Math.floor(diffMs / 86400000)
 
+      if (diffMins < 0) return 'Vừa xong' // Trường hợp thời gian trong tương lai
       if (diffMins < 1) return 'Vừa xong'
       if (diffMins < 60) return `${diffMins} phút trước`
       if (diffHours < 24) return `${diffHours} giờ trước`
       if (diffDays < 7) return `${diffDays} ngày trước`
+      
       return date.toLocaleDateString('vi-VN')
     } catch {
       return dateString

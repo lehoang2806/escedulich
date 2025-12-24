@@ -2372,6 +2372,14 @@
   color: #10b981;
 }
 
+.profile-revenue-amount.savings {
+  color: #f59e0b;
+}
+
+.profile-revenue-amount.original {
+  color: #64748b;
+}
+
 .profile-revenue-note {
   font-size: 0.75rem;
   color: #94a3b8;

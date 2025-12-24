@@ -34,6 +34,7 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd'
 import LockIcon from '@mui/icons-material/Lock'
 import LockOpenIcon from '@mui/icons-material/LockOpen'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import './UsersManagement.css'
 
 type RoleType = 'Admin' | 'Host' | 'Agency' | 'Customer'
 type ChipColor = NonNullable<ChipProps['color']>
@@ -53,6 +54,7 @@ type User = {
   status: 'active' | 'blocked'
   joinDate: string
   verified: boolean
+  isBanned: boolean // Thêm field để phân biệt tài khoản bị khóa (IS_BANNED) vs không hoạt động (IsActive=false)
 }
 
 const DEFAULT_ROLE: RoleType = 'Customer'
@@ -168,34 +170,23 @@ const mapBackendUserToFrontend = (backendUser: any): User => {
     address: backendUser.Address ?? backendUser.address ?? null,
     role: resolvedRole,
     roleId: normalizedRoleId,
-    // Backend kiểm tra: IsActive == false || IS_BANNED để xác định account bị khóa
-    // Frontend cần hiển thị đúng để admin biết account nào có thể ban/unban
-    status: !isActive || isBanned ? 'blocked' : 'active',
+    // Chỉ coi là blocked khi IS_BANNED = true
+    // IsActive = false chỉ có nghĩa là chưa verify OTP, không phải bị khóa
+    status: isBanned ? 'blocked' : 'active',
     joinDate,
-    verified: Boolean(isActive && !isBanned)
+    verified: Boolean(isActive && !isBanned),
+    isBanned: isBanned // Lưu giá trị IS_BANNED để biết có thể unban hay không
   }
 }
 
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case 'active':
-      return 'success'
-    case 'blocked':
-      return 'error'
-    default:
-      return 'default'
-  }
+const getStatusColor = (status: string, isBanned: boolean) => {
+  if (isBanned) return 'error' // Bị khóa (IS_BANNED = true)
+  return 'success' // Hoạt động
 }
 
-const getStatusLabel = (status: string) => {
-  switch (status) {
-    case 'active':
-      return 'Hoạt động'
-    case 'blocked':
-      return 'Khóa'
-    default:
-      return status
-  }
+const getStatusLabel = (status: string, isBanned: boolean) => {
+  if (isBanned) return 'Bị khóa' // IS_BANNED = true
+  return 'Hoạt động'
 }
 
 const getRoleLabel = (role: RoleType) => ROLE_LABELS[role] ?? role
@@ -354,16 +345,16 @@ export default function MainUsersContent() {
     })
   }, [users, searchText, selectedRole])
 
-  // Calculate statistics from filtered users
+  // Calculate statistics from ALL users (not filtered) - để hiển thị tổng quan hệ thống
   const statistics = useMemo(() => {
-    const totalUsers = filteredUsers.length
-    const verifiedUsers = filteredUsers.filter((u) => u.verified).length
-    const blockedUsers = filteredUsers.filter((u) => u.status === 'blocked').length
+    const totalUsers = users.length
+    const verifiedUsers = users.filter((u) => u.verified).length
+    const blockedUsers = users.filter((u) => u.status === 'blocked').length
 
     // Users mới: chỉ tính những user tham gia trong vòng 1 ngày (24 giờ)
     const oneDayAgo = new Date()
     oneDayAgo.setDate(oneDayAgo.getDate() - 1)
-    const newUsers = filteredUsers.filter((u) => {
+    const newUsers = users.filter((u) => {
       const joinDate = new Date(u.joinDate)
       return joinDate >= oneDayAgo
     }).length
@@ -374,7 +365,7 @@ export default function MainUsersContent() {
       verified: verifiedUsers,
       blocked: blockedUsers
     }
-  }, [filteredUsers])
+  }, [users])
 
   // Paginated users
   const paginatedUsers = useMemo(() => {
@@ -435,7 +426,8 @@ export default function MainUsersContent() {
             return {
               ...user,
               status: 'blocked' as const,
-              verified: false // Blocked users cannot be verified
+              verified: false, // Blocked users cannot be verified
+              isBanned: true // Cập nhật isBanned = true sau khi ban thành công
             }
           }
           return user
@@ -493,7 +485,8 @@ export default function MainUsersContent() {
             return {
               ...user,
               status: 'active' as const,
-              verified: true // Unbanned accounts are active, assume verified (backend will confirm)
+              verified: true, // Unbanned accounts are active, assume verified (backend will confirm)
+              isBanned: false // Cập nhật isBanned = false sau khi unban thành công
             }
           }
           return user
@@ -518,24 +511,8 @@ export default function MainUsersContent() {
   }
 
   return (
-    <Box
-      sx={{
-        bgcolor: 'common.white'
-      }}
-      className="p-[2.4rem]! rounded-3xl shadow-3xl"
-    >
-      <Box className="flex items-center justify-start mb-[2.4rem]">
-        <Typography
-          sx={{
-            background: (theme) => theme.customBackgroundColor.main,
-            backgroundClip: 'text',
-            color: 'transparent'
-          }}
-          className="text-[1.6rem]!"
-        >
-          Danh sách User
-        </Typography>
-      </Box>
+    <Box className="users-management-container">
+      <Typography className="users-management-title">Danh sách User</Typography>
 
       {/* Error Alert */}
       {error && (
@@ -550,248 +527,132 @@ export default function MainUsersContent() {
 
       {/* Loading State */}
       {loading && (
-        <Box className="flex justify-center items-center py-[4.8rem]">
-          <Typography className="text-[1.6rem]! text-gray-500">
-            Đang tải danh sách người dùng...
-          </Typography>
+        <Box className="loading-state">
+          <Typography className="loading-text">Đang tải danh sách người dùng...</Typography>
         </Box>
       )}
 
       {/* Statistics Cards */}
-      <Box className="grid grid-cols-4 gap-[1.6rem] mb-[2.4rem]">
-        <Card
-          sx={{
-            borderRadius: '1.6rem',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important',
-            color: 'white',
-            boxShadow: '0 4px 20px rgba(102, 126, 234, 0.3)',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: '0 8px 30px rgba(102, 126, 234, 0.4)'
-            }
-          }}
-        >
-          <CardContent sx={{ p: 2.5 }}>
-            <Box className="flex items-center justify-between">
-              <Box>
-                <Typography
-                  sx={{
-                    fontSize: '1.2rem',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                    mb: 0.5
-                  }}
-                >
-                  Tổng số User
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: '2.4rem',
-                    fontWeight: 700,
-                    color: 'white'
-                  }}
-                >
-                  {statistics.total}
-                </Typography>
-              </Box>
-              <PeopleIcon
-                sx={{
-                  fontSize: '4rem',
-                  color: 'rgba(255, 255, 255, 0.3)'
-                }}
-              />
-            </Box>
-          </CardContent>
-        </Card>
+      <Box className="stats-grid">
+        <div className="stat-card total">
+          <div className="stat-card-content">
+            <div className="stat-card-info">
+              <span className="stat-card-label">Tổng số User</span>
+              <span className="stat-card-value">{statistics.total}</span>
+            </div>
+            <PeopleIcon className="stat-card-icon" />
+          </div>
+        </div>
 
-        <Card
-          sx={{
-            borderRadius: '1.6rem',
-            background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%) !important',
-            color: 'white',
-            boxShadow: '0 4px 20px rgba(245, 87, 108, 0.3)',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: '0 8px 30px rgba(245, 87, 108, 0.4)'
-            }
-          }}
-        >
-          <CardContent sx={{ p: 2.5 }}>
-            <Box className="flex items-center justify-between">
-              <Box>
-                <Typography
-                  sx={{
-                    fontSize: '1.2rem',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                    mb: 0.5
-                  }}
-                >
-                  Users mới
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: '2.4rem',
-                    fontWeight: 700,
-                    color: 'white'
-                  }}
-                >
-                  {statistics.new}
-                </Typography>
-              </Box>
-              <PersonAddIcon
-                sx={{
-                  fontSize: '4rem',
-                  color: 'rgba(255, 255, 255, 0.3)'
-                }}
-              />
-            </Box>
-          </CardContent>
-        </Card>
+        <div className="stat-card new">
+          <div className="stat-card-content">
+            <div className="stat-card-info">
+              <span className="stat-card-label">Users mới</span>
+              <span className="stat-card-value">{statistics.new}</span>
+            </div>
+            <PersonAddIcon className="stat-card-icon" />
+          </div>
+        </div>
 
-        <Card
-          sx={{
-            borderRadius: '1.6rem',
-            background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%) !important',
-            color: 'white',
-            boxShadow: '0 4px 20px rgba(79, 172, 254, 0.3)',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: '0 8px 30px rgba(79, 172, 254, 0.4)'
-            }
-          }}
-        >
-          <CardContent sx={{ p: 2.5 }}>
-            <Box className="flex items-center justify-between">
-              <Box>
-                <Typography
-                  sx={{
-                    fontSize: '1.2rem',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                    mb: 0.5
-                  }}
-                >
-                  Đã xác thực
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: '2.4rem',
-                    fontWeight: 700,
-                    color: 'white'
-                  }}
-                >
-                  {statistics.verified}
-                </Typography>
-              </Box>
-              <CheckCircleIcon
-                sx={{
-                  fontSize: '4rem',
-                  color: 'rgba(255, 255, 255, 0.3)'
-                }}
-              />
-            </Box>
-          </CardContent>
-        </Card>
+        <div className="stat-card verified">
+          <div className="stat-card-content">
+            <div className="stat-card-info">
+              <span className="stat-card-label">Đã xác thực</span>
+              <span className="stat-card-value">{statistics.verified}</span>
+            </div>
+            <CheckCircleIcon className="stat-card-icon" />
+          </div>
+        </div>
 
-        <Card
-          sx={{
-            borderRadius: '1.6rem',
-            background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%) !important',
-            color: 'white',
-            boxShadow: '0 4px 20px rgba(250, 112, 154, 0.3)',
-            transition: 'transform 0.2s, box-shadow 0.2s',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: '0 8px 30px rgba(250, 112, 154, 0.4)'
-            }
-          }}
-        >
-          <CardContent sx={{ p: 2.5 }}>
-            <Box className="flex items-center justify-between">
-              <Box>
-                <Typography
-                  sx={{
-                    fontSize: '1.2rem',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                    mb: 0.5
-                  }}
-                >
-                  Đã khóa
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: '2.4rem',
-                    fontWeight: 700,
-                    color: 'white'
-                  }}
-                >
-                  {statistics.blocked}
-                </Typography>
-              </Box>
-              <LockIcon
-                sx={{
-                  fontSize: '4rem',
-                  color: 'rgba(255, 255, 255, 0.3)'
-                }}
-              />
-            </Box>
-          </CardContent>
-        </Card>
+        <div className="stat-card blocked">
+          <div className="stat-card-content">
+            <div className="stat-card-info">
+              <span className="stat-card-label">Đã khóa</span>
+              <span className="stat-card-value">{statistics.blocked}</span>
+            </div>
+            <LockIcon className="stat-card-icon" />
+          </div>
+        </div>
       </Box>
 
       {/* Search and Filter Section */}
-      <Box className="flex flex-col gap-[1.6rem] mb-[2.4rem]">
+      <Box className="search-section">
         {/* Search Bar */}
-        <TextField
-          fullWidth
-          placeholder="Tìm kiếm theo tên hoặc email..."
-          value={searchText}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            )
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              borderRadius: '1.2rem',
-              bgcolor: 'grey.50',
-              fontSize: '1.4rem',
-              '& fieldset': {
-                borderColor: 'grey.300'
+        <div className="search-input-wrapper">
+          <TextField
+            fullWidth
+            placeholder="Tìm kiếm theo tên hoặc email..."
+            value={searchText}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: '#94a3b8' }} />
+                </InputAdornment>
+              )
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '16px',
+                bgcolor: '#f8fafc',
+                fontSize: '1.4rem',
+                transition: 'all 0.3s ease',
+                '& fieldset': {
+                  borderColor: '#e2e8f0'
+                },
+                '&:hover': {
+                  bgcolor: '#f1f5f9',
+                  '& fieldset': {
+                    borderColor: '#667eea'
+                  }
+                },
+                '&.Mui-focused': {
+                  bgcolor: '#ffffff',
+                  boxShadow: '0 0 0 3px rgba(102, 126, 234, 0.15)',
+                  '& fieldset': {
+                    borderColor: '#667eea'
+                  }
+                }
               },
-              '&:hover fieldset': {
-                borderColor: 'primary.main'
-              },
-              '&.Mui-focused fieldset': {
-                borderColor: 'primary.main'
+              '& .MuiInputBase-input': {
+                fontSize: '1.4rem',
+                py: 1.5
               }
-            },
-            '& .MuiInputBase-input': {
-              fontSize: '1.4rem',
-              py: 1.5
-            }
-          }}
-        />
+            }}
+          />
+        </div>
 
         {/* Role Filter Buttons */}
-        <Box className="flex items-center gap-[1.2rem]">
-          <Typography className="text-[1.4rem]! font-medium! text-gray-600">
-            Lọc theo vai trò:
-          </Typography>
-          <ButtonGroup variant="outlined" size="medium">
+        <Box className="filter-section">
+          <Typography className="filter-label">Lọc theo vai trò:</Typography>
+          <ButtonGroup variant="outlined" size="medium" className="filter-buttons">
             {ROLE_FILTER_OPTIONS.map((option) => (
               <Button
                 key={option.value}
                 onClick={() => handleRoleFilter(option.value)}
                 variant={selectedRole === option.value ? 'contained' : 'outlined'}
                 sx={{
-                  borderRadius: '0.8rem',
+                  borderRadius: '12px',
                   textTransform: 'none',
-                  px: 2
+                  fontWeight: 600,
+                  px: 2.5,
+                  fontSize: '1.3rem',
+                  ...(selectedRole === option.value && {
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+                    '&:hover': {
+                      background: 'linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%)'
+                    }
+                  }),
+                  ...(selectedRole !== option.value && {
+                    borderColor: '#e2e8f0',
+                    color: '#64748b',
+                    '&:hover': {
+                      background: '#f8fafc',
+                      borderColor: '#667eea',
+                      color: '#667eea'
+                    }
+                  })
                 }}
               >
                 {option.label}
@@ -802,9 +663,14 @@ export default function MainUsersContent() {
             <Button
               onClick={() => setSelectedRole(null)}
               size="small"
+              className="clear-filter-btn"
               sx={{
                 textTransform: 'none',
-                color: 'text.secondary'
+                color: '#94a3b8',
+                '&:hover': {
+                  color: '#667eea',
+                  background: 'rgba(102, 126, 234, 0.08)'
+                }
               }}
             >
               Xóa bộ lọc
@@ -814,34 +680,42 @@ export default function MainUsersContent() {
       </Box>
 
       {!loading && (
-        <TableContainer component={Paper} sx={{ boxShadow: 'none', bgcolor: 'transparent' }}>
-          <Table sx={{ minWidth: 650 }} aria-label="users table">
+        <TableContainer
+          component={Paper}
+          className="users-table-container"
+          sx={{ boxShadow: 'none' }}
+        >
+          <Table className="users-table" sx={{ minWidth: 800 }} aria-label="users table">
             <TableHead>
               <TableRow>
-                <TableCell className="font-semibold!">User</TableCell>
-                <TableCell className="font-semibold!">Email</TableCell>
-                <TableCell className="font-semibold!">Vai trò</TableCell>
-                <TableCell className="font-semibold!">Trạng thái</TableCell>
-                <TableCell className="font-semibold!">Ngày tham gia</TableCell>
-                <TableCell className="font-semibold!">Xác thực</TableCell>
-                <TableCell className="font-semibold! text-center!">Hành động</TableCell>
+                <TableCell>User</TableCell>
+                <TableCell>Email</TableCell>
+                <TableCell>Vai trò</TableCell>
+                <TableCell>Trạng thái</TableCell>
+                <TableCell>Ngày tham gia</TableCell>
+                <TableCell>Xác thực</TableCell>
+                <TableCell sx={{ textAlign: 'center' }}>Hành động</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {paginatedUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" className="py-[3.2rem]!">
-                    <Typography className="text-gray-500">Không tìm thấy User nào</Typography>
+                  <TableCell colSpan={7} align="center">
+                    <Box className="empty-state">
+                      <Typography className="empty-state-text">
+                        Không tìm thấy User nào
+                      </Typography>
+                    </Box>
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedUsers.map((user) => (
                   <TableRow key={user.id} hover>
                     <TableCell>
-                      <Box className="flex items-center gap-[1.2rem]">
+                      <Box className="user-cell">
                         <Avatar
                           src={user.avatar || undefined}
-                          sx={{ width: 40, height: 40 }}
+                          className="user-avatar"
                           onError={(e) => {
                             // Fallback to initial if image fails to load
                             const target = e.target as HTMLImageElement
@@ -850,22 +724,62 @@ export default function MainUsersContent() {
                         >
                           {user.name.charAt(0)}
                         </Avatar>
-                        <Typography className="font-medium!">{user.name}</Typography>
+                        <Typography className="user-name">{user.name}</Typography>
                       </Box>
                     </TableCell>
-                    <TableCell>{user.email}</TableCell>
+                    <TableCell className="user-email">{user.email}</TableCell>
                     <TableCell>
                       <Chip
                         label={getRoleLabel(user.role)}
                         size="small"
-                        color={ROLE_CHIP_COLOR_MAP[user.role]}
+                        className={`role-chip ${user.role.toLowerCase()}`}
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: '1.2rem',
+                          borderRadius: '10px',
+                          ...(user.role === 'Host' && {
+                            background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
+                            color: 'white'
+                          }),
+                          ...(user.role === 'Agency' && {
+                            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                            color: 'white'
+                          }),
+                          ...(user.role === 'Customer' && {
+                            background: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
+                            color: 'white'
+                          }),
+                          ...(user.role === 'Admin' && {
+                            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                            color: 'white'
+                          })
+                        }}
                       />
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={getStatusLabel(user.status)}
+                        label={getStatusLabel(user.status, user.isBanned)}
                         size="small"
-                        color={getStatusColor(user.status) as 'success' | 'default' | 'error'}
+                        className={`status-chip ${user.isBanned ? 'banned' : user.status}`}
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: '1.2rem',
+                          borderRadius: '20px',
+                          ...(user.status === 'active' &&
+                            !user.isBanned && {
+                              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                              color: 'white'
+                            }),
+                          ...(user.isBanned && {
+                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                            color: 'white'
+                          }),
+                          ...(user.status === 'blocked' &&
+                            !user.isBanned && {
+                              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                              color: 'white'
+                            })
+                        }}
                       />
                     </TableCell>
                     <TableCell>{user.joinDate}</TableCell>
@@ -873,39 +787,40 @@ export default function MainUsersContent() {
                       <Chip
                         label={user.verified ? 'Đã xác thực' : 'Chưa xác thực'}
                         size="small"
-                        color={user.verified ? 'success' : 'default'}
+                        className={`verified-chip ${user.verified ? 'yes' : 'no'}`}
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: '1.2rem',
+                          borderRadius: '10px',
+                          ...(user.verified && {
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            color: '#059669',
+                            border: '1px solid rgba(16, 185, 129, 0.3)'
+                          }),
+                          ...(!user.verified && {
+                            background: 'rgba(148, 163, 184, 0.12)',
+                            color: '#64748b',
+                            border: '1px solid rgba(148, 163, 184, 0.3)'
+                          })
+                        }}
                       />
                     </TableCell>
                     <TableCell>
-                      <Box className="flex items-center justify-center gap-[0.8rem]">
-                        {/* Đã bỏ nút Edit - Admin không thể chỉnh sửa thông tin user khác */}
-                        {user.status === 'blocked' ? (
+                      <Box className="action-buttons">
+                        {/* Chỉ hiển thị nút Mở khóa khi tài khoản thực sự bị ban (IS_BANNED = true) */}
+                        {user.isBanned ? (
                           <IconButton
-                            size="small"
-                            color="success"
+                            className="action-btn unlock"
                             title="Mở khóa (Hoạt động)"
                             onClick={() => handleUnbanAccount(user)}
-                            sx={{
-                              '&:hover': {
-                                bgcolor: 'success.light',
-                                color: 'white'
-                              }
-                            }}
                           >
                             <LockOpenIcon fontSize="small" />
                           </IconButton>
                         ) : (
                           <IconButton
-                            size="small"
-                            color="warning"
+                            className="action-btn lock"
                             title="Khóa tài khoản"
                             onClick={() => handleBanAccount(user)}
-                            sx={{
-                              '&:hover': {
-                                bgcolor: 'warning.light',
-                                color: 'white'
-                              }
-                            }}
                           >
                             <LockIcon fontSize="small" />
                           </IconButton>
@@ -922,29 +837,35 @@ export default function MainUsersContent() {
 
       {/* Pagination */}
       {!loading && filteredUsers.length > 0 && (
-        <Box className="flex justify-center mt-[2.4rem]">
-          <Stack spacing={2}>
-            <Pagination
-              count={totalPages}
-              page={page}
-              onChange={(_, value) => setPage(value)}
-              color="primary"
-              size="large"
-              sx={{
-                '& .MuiPaginationItem-root': {
-                  fontSize: '1.4rem',
-                  '&.Mui-selected': {
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important',
-                    color: 'white',
-                    fontWeight: 600,
-                    '&:hover': {
-                      background: 'linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%) !important'
-                    }
+        <Box className="pagination-container">
+          <Pagination
+            count={totalPages}
+            page={page}
+            onChange={(_, value) => setPage(value)}
+            color="primary"
+            size="large"
+            sx={{
+              '& .MuiPaginationItem-root': {
+                fontSize: '1.4rem',
+                fontWeight: 600,
+                borderRadius: '12px',
+                minWidth: '40px',
+                height: '40px',
+                margin: '0 4px',
+                '&.Mui-selected': {
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important',
+                  color: 'white',
+                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%) !important'
                   }
+                },
+                '&:hover:not(.Mui-selected)': {
+                  background: 'rgba(102, 126, 234, 0.1)'
                 }
-              }}
-            />
-          </Stack>
+              }
+            }}
+          />
         </Box>
       )}
 
@@ -964,33 +885,95 @@ export default function MainUsersContent() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: '2.4rem'
+            borderRadius: '24px',
+            overflow: 'hidden'
           }
         }}
       >
         <DialogTitle
           sx={{
             fontSize: '1.8rem',
-            fontWeight: 600,
-            pb: 1
+            fontWeight: 700,
+            pb: 1,
+            background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+            borderBottom: '1px solid #fed7aa',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5
           }}
         >
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)'
+            }}
+          >
+            <LockIcon sx={{ color: 'white', fontSize: '1.4rem' }} />
+          </Box>
           Khóa tài khoản
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 3 }}>
           {selectedUser && (
             <Box>
-              <Alert severity="warning" sx={{ mb: 2, borderRadius: '1.2rem' }}>
+              <Alert
+                severity="warning"
+                sx={{
+                  mb: 3,
+                  borderRadius: '16px',
+                  '& .MuiAlert-icon': { fontSize: '1.5rem' }
+                }}
+              >
                 Bạn có chắc chắn muốn khóa tài khoản này không? Người dùng sẽ nhận được thông báo về
                 lý do khóa.
               </Alert>
-              <Box className="flex items-center gap-[1.2rem] p-[1.6rem] bg-gray-50 rounded-[1.2rem] mb-[2rem]">
-                <Avatar sx={{ width: 56, height: 56 }}>{selectedUser.name.charAt(0)}</Avatar>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  p: 2.5,
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                  borderRadius: '16px',
+                  mb: 3,
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                <Avatar
+                  src={selectedUser.avatar || undefined}
+                  sx={{
+                    width: 64,
+                    height: 64,
+                    fontSize: '1.6rem',
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+                  }}
+                >
+                  {selectedUser.name.charAt(0)}
+                </Avatar>
                 <Box>
-                  <Typography className="font-semibold! text-[1.6rem]!">
+                  <Typography
+                    sx={{
+                      fontWeight: 700,
+                      fontSize: '1.5rem',
+                      color: '#1e293b',
+                      mb: 0.5
+                    }}
+                  >
                     {selectedUser.name}
                   </Typography>
-                  <Typography className="text-[1.4rem]! text-gray-600">
+                  <Typography
+                    sx={{
+                      fontSize: '1.3rem',
+                      color: '#64748b'
+                    }}
+                  >
                     {selectedUser.email}
                   </Typography>
                 </Box>
@@ -1010,14 +993,35 @@ export default function MainUsersContent() {
                 helperText={banError}
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    borderRadius: '1.2rem'
+                    borderRadius: '16px',
+                    fontSize: '1.4rem',
+                    '&:hover fieldset': {
+                      borderColor: '#f59e0b'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#f59e0b'
+                    }
+                  },
+                  '& .MuiInputLabel-root': {
+                    fontSize: '1.4rem',
+                    '&.Mui-focused': {
+                      color: '#f59e0b'
+                    }
                   }
                 }}
               />
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+        <DialogActions
+          sx={{
+            px: 3,
+            pb: 3,
+            pt: 2,
+            gap: 1.5,
+            borderTop: '1px solid #f1f5f9'
+          }}
+        >
           <Button
             onClick={() => {
               setBanDialogOpen(false)
@@ -1029,8 +1033,15 @@ export default function MainUsersContent() {
             disabled={actionLoading}
             sx={{
               textTransform: 'none',
-              borderRadius: '1.2rem',
-              px: 3
+              borderRadius: '14px',
+              px: 4,
+              py: 1.2,
+              fontSize: '1.4rem',
+              fontWeight: 600,
+              color: '#64748b',
+              '&:hover': {
+                background: '#f1f5f9'
+              }
             }}
           >
             Hủy
@@ -1038,12 +1049,20 @@ export default function MainUsersContent() {
           <Button
             onClick={handleConfirmBan}
             variant="contained"
-            color="warning"
             disabled={actionLoading}
             sx={{
               textTransform: 'none',
-              borderRadius: '1.2rem',
-              px: 3
+              borderRadius: '14px',
+              px: 4,
+              py: 1.2,
+              fontSize: '1.4rem',
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+              boxShadow: '0 4px 12px rgba(245, 158, 11, 0.4)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                boxShadow: '0 6px 16px rgba(245, 158, 11, 0.5)'
+              }
             }}
           >
             {actionLoading ? 'Đang khóa...' : 'Khóa tài khoản'}
@@ -1067,33 +1086,100 @@ export default function MainUsersContent() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: '2.4rem'
+            borderRadius: '24px',
+            overflow: 'hidden'
           }
         }}
       >
         <DialogTitle
           sx={{
             fontSize: '1.8rem',
-            fontWeight: 600,
-            pb: 1
+            fontWeight: 700,
+            pb: 1,
+            background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+            borderBottom: '1px solid #a7f3d0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5
           }}
         >
+          <Box
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+            }}
+          >
+            <LockOpenIcon sx={{ color: 'white', fontSize: '1.4rem' }} />
+          </Box>
           Mở khóa tài khoản
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 3 }}>
           {selectedUser && (
             <Box>
-              <Alert severity="info" sx={{ mb: 2, borderRadius: '1.2rem' }}>
+              <Alert
+                severity="info"
+                sx={{
+                  mb: 3,
+                  borderRadius: '16px',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                  color: '#065f46',
+                  '& .MuiAlert-icon': {
+                    fontSize: '1.5rem',
+                    color: '#10b981'
+                  }
+                }}
+              >
                 Bạn có chắc chắn muốn mở khóa tài khoản này không? Tài khoản sẽ được kích hoạt lại
                 và người dùng có thể đăng nhập bình thường.
               </Alert>
-              <Box className="flex items-center gap-[1.2rem] p-[1.6rem] bg-gray-50 rounded-[1.2rem] mb-[2rem]">
-                <Avatar sx={{ width: 56, height: 56 }}>{selectedUser.name.charAt(0)}</Avatar>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  p: 2.5,
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                  borderRadius: '16px',
+                  mb: 3,
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                <Avatar
+                  src={selectedUser.avatar || undefined}
+                  sx={{
+                    width: 64,
+                    height: 64,
+                    fontSize: '1.6rem',
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+                  }}
+                >
+                  {selectedUser.name.charAt(0)}
+                </Avatar>
                 <Box>
-                  <Typography className="font-semibold! text-[1.6rem]!">
+                  <Typography
+                    sx={{
+                      fontWeight: 700,
+                      fontSize: '1.5rem',
+                      color: '#1e293b',
+                      mb: 0.5
+                    }}
+                  >
                     {selectedUser.name}
                   </Typography>
-                  <Typography className="text-[1.4rem]! text-gray-600">
+                  <Typography
+                    sx={{
+                      fontSize: '1.3rem',
+                      color: '#64748b'
+                    }}
+                  >
                     {selectedUser.email}
                   </Typography>
                 </Box>
@@ -1113,14 +1199,35 @@ export default function MainUsersContent() {
                 helperText={unbanError}
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    borderRadius: '1.2rem'
+                    borderRadius: '16px',
+                    fontSize: '1.4rem',
+                    '&:hover fieldset': {
+                      borderColor: '#10b981'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#10b981'
+                    }
+                  },
+                  '& .MuiInputLabel-root': {
+                    fontSize: '1.4rem',
+                    '&.Mui-focused': {
+                      color: '#10b981'
+                    }
                   }
                 }}
               />
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+        <DialogActions
+          sx={{
+            px: 3,
+            pb: 3,
+            pt: 2,
+            gap: 1.5,
+            borderTop: '1px solid #f1f5f9'
+          }}
+        >
           <Button
             onClick={() => {
               setUnbanDialogOpen(false)
@@ -1132,8 +1239,15 @@ export default function MainUsersContent() {
             disabled={actionLoading}
             sx={{
               textTransform: 'none',
-              borderRadius: '1.2rem',
-              px: 3
+              borderRadius: '14px',
+              px: 4,
+              py: 1.2,
+              fontSize: '1.4rem',
+              fontWeight: 600,
+              color: '#64748b',
+              '&:hover': {
+                background: '#f1f5f9'
+              }
             }}
           >
             Hủy
@@ -1141,12 +1255,20 @@ export default function MainUsersContent() {
           <Button
             onClick={handleConfirmUnban}
             variant="contained"
-            color="success"
             disabled={actionLoading}
             sx={{
               textTransform: 'none',
-              borderRadius: '1.2rem',
-              px: 3
+              borderRadius: '14px',
+              px: 4,
+              py: 1.2,
+              fontSize: '1.4rem',
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                boxShadow: '0 6px 16px rgba(16, 185, 129, 0.5)'
+              }
             }}
           >
             {actionLoading ? 'Đang mở khóa...' : 'Mở khóa tài khoản'}

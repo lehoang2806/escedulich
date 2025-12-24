@@ -654,6 +654,111 @@
   color: #16a34a;
 }
 
+/* Toast Notification - góc phải màn hình */
+.host-toast {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  min-width: 320px;
+  max-width: 420px;
+  font-size: 0.9375rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  animation: slideInRight 0.3s ease-out;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
+  line-height: 1.5;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.host-toast-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.host-toast-content {
+  flex: 1;
+}
+
+.host-toast-content strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.host-toast-content p {
+  margin: 0;
+  line-height: 1.5;
+  font-size: 0.875rem;
+}
+
+.host-toast-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.host-toast-close:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.host-toast-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.host-toast-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.host-toast-error .host-toast-icon {
+  color: #dc2626;
+}
+
+.host-toast-error .host-toast-close {
+  color: #991b1b;
+}
+
+.host-toast-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.host-toast-success .host-toast-icon {
+  color: #16a34a;
+}
+
+.host-toast-success .host-toast-close {
+  color: #166534;
+}
+
 /* Profile Form */
 .host-profile-form {
   display: flex;

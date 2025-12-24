@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   Box,
   Card,
@@ -41,9 +41,11 @@ import {
   ThumbUpOffAlt as LikeBorderIcon,
   Comment as CommentIcon,
   Send as SendIcon,
-  Favorite as FavoriteIcon
+  Favorite as FavoriteIcon,
+  Article as ArticleIcon
 } from '@mui/icons-material'
 import { uploadImageToFirebase } from '~/services/firebaseStorage'
+import { useNotification } from '~/contexts/NotificationContext'
 import {
   fetchAllPosts,
   createPost,
@@ -182,7 +184,7 @@ const formatTimeAgo = (dateString?: string, postId?: number | string) => {
     if (diffMins < 60) return `${diffMins} phút trước`
     if (diffHours < 24) return `${diffHours} giờ trước`
     if (diffDays < 30) return `${diffDays} ngày trước`
-    return date.toLocaleDateString('vi-VN')
+    return date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
   } catch {
     return 'Vừa xong'
   }
@@ -311,6 +313,9 @@ export default function PostsManagement() {
   const [deletingCommentInfo, setDeletingCommentInfo] = useState<{ commentId: string; postId: number; authorId?: number; isOwnContent?: boolean } | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteReasonError, setDeleteReasonError] = useState('')
+  
+  // Ref để track các comment IDs đã bị xóa trong session (tránh hiển thị lại sau polling)
+  const deletedCommentIdsRef = useRef<Set<string>>(new Set())
 
   // Delete Post with Reason State (for deleting others' posts)
   const [deletePostReasonDialogOpen, setDeletePostReasonDialogOpen] = useState(false)
@@ -366,8 +371,27 @@ export default function PostsManagement() {
     currentUser?.role === 'Admin' ||
     currentUser?.roleName === 'Admin' ||
     currentUser?.Role === 'Admin' ||
-    currentUser?.roleId === 1
+    currentUser?.roleId === 1 ||
+    currentUser?.roleId === '1' ||
+    currentUser?.RoleId === 1 ||
+    currentUser?.RoleId === '1'
   const isAuthenticated = !!currentUser
+
+  // Helper function để filter ra các comments đã bị xóa trong session
+  const filterDeletedComments = (comments: PostComment[]): PostComment[] => {
+    const filterRecursive = (commentList: PostComment[]): PostComment[] => {
+      return commentList
+        .filter(comment => {
+          const commentId = comment.postCommentId || String(comment.id || '')
+          return !deletedCommentIdsRef.current.has(commentId)
+        })
+        .map(comment => ({
+          ...comment,
+          replies: comment.replies ? filterRecursive(comment.replies as unknown as PostComment[]) as unknown as PostCommentReply[] : []
+        }))
+    }
+    return filterRecursive(comments)
+  }
 
   // Debug: Log current user info
   useEffect(() => {
@@ -386,7 +410,18 @@ export default function PostsManagement() {
 
   // Lấy reaction hiện tại của user cho 1 post (nếu có)
   const getCurrentUserReaction = (post: PostDto): ReactionKey | null => {
-    if (!currentUser || !post.likes || post.likes.length === 0) return null
+    if (!currentUser) return null
+    
+    // Kiểm tra cả likesCount và likes array
+    // Nếu likesCount = 0 thì chắc chắn không có reaction
+    if (post.likesCount === 0) {
+      return null
+    }
+    
+    if (!post.likes || !Array.isArray(post.likes) || post.likes.length === 0) {
+      console.log('[getCurrentUserReaction] No likes array or empty:', post.postId, post.likes)
+      return null
+    }
 
     const userId =
       currentUser?.id ??
@@ -398,10 +433,25 @@ export default function PostsManagement() {
     if (!userId) return null
 
     const userIdStr = String(userId)
-    const userLike = post.likes.find((like) => String(like.accountId ?? '') === userIdStr)
-    if (!userLike) return null
+    const userLike = post.likes.find((like) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const likeAccountId = String(like.accountId ?? (like as any).AccountId ?? '')
+      return likeAccountId === userIdStr
+    })
+    
+    if (!userLike) {
+      console.log('[getCurrentUserReaction] User not found in likes:', post.postId, userIdStr, post.likes)
+      return null
+    }
 
-    const rawType = (userLike.reactionType ?? '').toString().toLowerCase()
+    // Kiểm tra xem có reactionType hợp lệ không
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawType = (userLike.reactionType ?? (userLike as any).ReactionType ?? '').toString().toLowerCase().trim()
+    console.log('[getCurrentUserReaction] Found user reaction:', post.postId, rawType, userLike)
+    if (!rawType || rawType === '' || rawType === 'null' || rawType === 'undefined') {
+      return null // Không có reaction hợp lệ
+    }
+    
     switch (rawType) {
       case 'like':
         return 'like'
@@ -416,7 +466,7 @@ export default function PostsManagement() {
       case 'angry':
         return 'angry'
       default:
-        return 'like'
+        return null // Không nhận dạng được reaction type
     }
   }
 
@@ -428,19 +478,93 @@ export default function PostsManagement() {
   // Load Posts
   useEffect(() => {
     loadPosts()
+
+    // Polling mỗi 2 giây để cập nhật bài viết gần như realtime
+    const pollInterval = setInterval(() => {
+      loadPostsSilent()
+    }, 2000)
+
+    // Refresh ngay khi user quay lại tab này
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadPostsSilent()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Refresh ngay khi window được focus
+    const handleFocus = () => {
+      loadPostsSilent()
+    }
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      clearInterval(pollInterval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [])
+
+  // Load posts không hiển thị loading (dùng cho polling)
+  const loadPostsSilent = async () => {
+    try {
+      const data = await fetchAllPosts()
+      
+      // Fetch comments cho tất cả posts để có số đếm chính xác
+      if (data && data.length > 0) {
+        const updatedPosts = await Promise.all(
+          data.map(async (post) => {
+            try {
+              const comments = await fetchCommentsByPost(post.postId)
+              const filteredComments = filterDeletedComments(comments)
+              const totalCount = countTotalComments(filteredComments)
+              // Lưu comments vào state
+              setPostComments((prev) => ({ ...prev, [post.postId]: filteredComments }))
+              return { ...post, commentsCount: totalCount }
+            } catch (err) {
+              console.error(`Error fetching comments for post ${post.postId}:`, err)
+              return post
+            }
+          })
+        )
+        setPosts(updatedPosts)
+      } else {
+        setPosts(data || [])
+      }
+    } catch (err) {
+      console.error('Error polling posts:', err)
+    }
+  }
 
   const loadPosts = async () => {
     try {
       setLoading(true)
       setError(null)
       const data = await fetchAllPosts()
-      setPosts(data || [])
       
-      // Auto-sync approval times cho các bài đã approved mà chưa có trong Firestore
-      // Điều này giúp các bài viết cũ (approved trước khi có code Firestore) cũng có approval time
+      // Fetch comments cho tất cả posts để có số đếm chính xác
       if (data && data.length > 0) {
-        syncApprovalTimesForApprovedPosts(data)
+        const updatedPosts = await Promise.all(
+          data.map(async (post) => {
+            try {
+              const comments = await fetchCommentsByPost(post.postId)
+              const filteredComments = filterDeletedComments(comments)
+              const totalCount = countTotalComments(filteredComments)
+              // Lưu comments vào state
+              setPostComments((prev) => ({ ...prev, [post.postId]: filteredComments }))
+              return { ...post, commentsCount: totalCount }
+            } catch (err) {
+              console.error(`Error fetching comments for post ${post.postId}:`, err)
+              return post // Giữ nguyên commentsCount từ backend nếu lỗi
+            }
+          })
+        )
+        setPosts(updatedPosts)
+        
+        // Auto-sync approval times cho các bài đã approved mà chưa có trong Firestore
+        syncApprovalTimesForApprovedPosts(updatedPosts)
+      } else {
+        setPosts(data || [])
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tải danh sách bài viết')
@@ -485,19 +609,11 @@ export default function PostsManagement() {
     let filtered = posts
 
     // Loại bỏ bài viết Pending - những bài này sẽ được xem ở trang "Duyệt bài viết"
+    // Loại bỏ bài viết Rejected - không hiển thị bài đã từ chối
     filtered = filtered.filter((post) => {
       const postStatus = post.status?.toLowerCase() ?? ''
-      return postStatus !== 'pending'
+      return postStatus !== 'pending' && postStatus !== 'rejected'
     })
-
-    // Filter by status (fast)
-    if (statusFilter !== 'All') {
-      const statusLower = statusFilter.toLowerCase()
-      filtered = filtered.filter((post) => {
-        const postStatus = post.status?.toLowerCase() ?? ''
-        return postStatus === statusLower
-      })
-    }
 
     // Filter by search text (fast)
     if (searchText.trim()) {
@@ -526,7 +642,7 @@ export default function PostsManagement() {
     })
 
     return filtered
-  }, [posts, searchText, statusFilter])
+  }, [posts, searchText])
 
   // Create Post Handlers
   const handleOpenCreateDialog = () => {
@@ -979,17 +1095,23 @@ export default function PostsManagement() {
 
     const userIdStr = String(userId)
     const currentLikes = Array.isArray(post.likes) ? post.likes : []
-    const existingReaction = currentLikes.find((like: any) => String(like.accountId ?? '') === userIdStr)
-    const currentReactionTypeId = existingReaction?.reactionType 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const existingReaction = currentLikes.find((like: any) => {
+      const likeAccountId = String(like.accountId ?? like.AccountId ?? '')
+      return likeAccountId === userIdStr
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentReactionTypeId = (existingReaction as any)?.reactionType || (existingReaction as any)?.ReactionType
       ? (() => {
-          const rt = String(existingReaction.reactionType).toLowerCase()
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rt = String((existingReaction as any)?.reactionType ?? (existingReaction as any)?.ReactionType ?? '').toLowerCase()
           if (rt === 'like') return 1
           if (rt === 'love') return 2
           if (rt === 'haha') return 3
           if (rt === 'wow') return 4
           if (rt === 'sad') return 5
           if (rt === 'angry') return 6
-          return 1
+          return null
         })()
       : null
 
@@ -1006,17 +1128,24 @@ export default function PostsManagement() {
         const updatedLikes = Array.isArray(p.likes) ? [...p.likes] : []
         
         if (isUnliking) {
-          // Remove reaction
-          const filteredLikes = updatedLikes.filter((like: any) => String(like.accountId ?? '') !== userIdStr)
+          // Remove reaction - filter out user's reaction completely
+          const filteredLikes = updatedLikes.filter((like: any) => {
+            const likeAccountId = String(like.accountId ?? like.AccountId ?? '')
+            return likeAccountId !== userIdStr
+          })
+          console.log('[PostsManagement] Unlike - filtered likes:', filteredLikes.length, 'from', updatedLikes.length)
           return {
             ...p,
             likes: filteredLikes,
-            likesCount: Math.max(0, (p.likesCount ?? 0) - 1),
+            likesCount: filteredLikes.length, // Sử dụng length thực tế thay vì trừ 1
             isLiked: false
           }
         } else {
           // Add or update reaction
-          const existingIndex = updatedLikes.findIndex((like: any) => String(like.accountId ?? '') === userIdStr)
+          const existingIndex = updatedLikes.findIndex((like: any) => {
+            const likeAccountId = String(like.accountId ?? like.AccountId ?? '')
+            return likeAccountId === userIdStr
+          })
           const reactionTypeNames: Record<number, string> = {
             1: 'like',
             2: 'love',
@@ -1056,13 +1185,15 @@ export default function PostsManagement() {
       await reactToPost(post.postId, reactionTypeId)
 
       // Sau khi API thành công, reload post để lấy dữ liệu chính xác từ backend
-      // (để có postReactionId thật, không phải temp)
-      try {
-        const updatedPost = await fetchPostById(post.postId)
-        setPosts((prev) => prev.map((p) => (p.postId === updatedPost.postId ? updatedPost : p)))
-      } catch (reloadError) {
-        console.warn('[PostsManagement] Could not reload post after reaction, using optimistic update:', reloadError)
-        // Giữ optimistic update nếu không reload được
+      // Chỉ reload khi thêm/đổi reaction, không reload khi unlike để tránh race condition
+      if (!isUnliking) {
+        try {
+          const updatedPost = await fetchPostById(post.postId)
+          setPosts((prev) => prev.map((p) => (p.postId === updatedPost.postId ? updatedPost : p)))
+        } catch (reloadError) {
+          console.warn('[PostsManagement] Could not reload post after reaction, using optimistic update:', reloadError)
+          // Giữ optimistic update nếu không reload được
+        }
       }
     } catch (err) {
       // Revert optimistic update on error
@@ -1098,14 +1229,16 @@ export default function PostsManagement() {
         setError(null) // Clear previous errors
         console.log('[PostsManagement] Loading comments for post:', postId)
         const comments = await fetchCommentsByPost(postId)
-        const totalCount = countTotalComments(comments)
+        // Filter ra các comments đã bị xóa trong session
+        const filteredComments = filterDeletedComments(comments)
+        const totalCount = countTotalComments(filteredComments)
         console.log('[PostsManagement] Loaded comments:', {
           postId,
-          parentCount: comments.length,
+          parentCount: filteredComments.length,
           totalCount,
-          comments
+          comments: filteredComments
         })
-        setPostComments((prev) => ({ ...prev, [postId]: comments }))
+        setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
         
         // Update post comment count to reflect actual total (including replies)
         setPosts((prev) =>
@@ -1159,21 +1292,23 @@ export default function PostsManagement() {
       // Reload comments after a short delay to ensure backend has processed
       await new Promise((resolve) => setTimeout(resolve, 300))
       const comments = await fetchCommentsByPost(postId)
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
 
       console.log('[PostsManagement] Reloaded comments:', {
         postId,
-        count: comments.length,
-        comments
+        count: filteredComments.length,
+        comments: filteredComments
       })
 
-      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+      setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
 
       // Clear comment text
       setCommentTexts((prev) => ({ ...prev, [postId]: '' }))
 
       // Update post comment count (including all replies)
       setPosts((prev) =>
-        prev.map((p) => (p.postId === postId ? { ...p, commentsCount: countTotalComments(comments) } : p))
+        prev.map((p) => (p.postId === postId ? { ...p, commentsCount: countTotalComments(filteredComments) } : p))
       )
 
       // Show success message
@@ -1218,11 +1353,13 @@ export default function PostsManagement() {
 
       // Reload comments
       const comments = await fetchCommentsByPost(replyingTo.postId)
-      setPostComments((prev) => ({ ...prev, [replyingTo.postId]: comments }))
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
+      setPostComments((prev) => ({ ...prev, [replyingTo.postId]: filteredComments }))
 
       // Update post comment count (including all replies)
       setPosts((prev) =>
-        prev.map((p) => (p.postId === replyingTo.postId ? { ...p, commentsCount: countTotalComments(comments) } : p))
+        prev.map((p) => (p.postId === replyingTo.postId ? { ...p, commentsCount: countTotalComments(filteredComments) } : p))
       )
 
       // Clear reply state
@@ -1259,7 +1396,9 @@ export default function PostsManagement() {
 
       // Reload comments
       const comments = await fetchCommentsByPost(postId)
-      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
+      setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
 
       // Clear editing state
       handleCancelEditComment(commentId)
@@ -1293,6 +1432,9 @@ export default function PostsManagement() {
       return
     }
 
+    // Thêm commentId vào deletedCommentIdsRef để tránh hiển thị lại sau polling
+    deletedCommentIdsRef.current.add(commentId)
+
     try {
       setDeletingComment((prev) => new Set(prev).add(commentId))
       setDeleteCommentDialogOpen(false)
@@ -1302,16 +1444,20 @@ export default function PostsManagement() {
 
       // Reload comments
       const comments = await fetchCommentsByPost(postId)
-      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
+      setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
 
       // Update post comment count (including all replies)
       setPosts((prev) =>
         prev.map((p) =>
-          p.postId === postId ? { ...p, commentsCount: countTotalComments(comments) } : p
+          p.postId === postId ? { ...p, commentsCount: countTotalComments(filteredComments) } : p
         )
       )
       setSnackbar({ open: true, message: 'Đã xóa bình luận', severity: 'success' })
     } catch (err) {
+      // Xóa commentId khỏi deletedCommentIdsRef nếu xóa thất bại
+      deletedCommentIdsRef.current.delete(commentId)
       setError(err instanceof Error ? err.message : 'Không thể xóa bình luận')
       setSnackbar({ open: true, message: 'Không thể xóa bình luận', severity: 'error' })
       console.error('Error deleting comment:', err)
@@ -1376,8 +1522,9 @@ export default function PostsManagement() {
 
     // Chủ bài post có thể xóa comment trong bài của mình
     if (post) {
-      const postAuthorId = post.authorId ?? 0
+      const postAuthorId = post.authorId ?? (post as any).AuthorId ?? (post as any).posterId ?? (post as any).PosterId ?? 0
       const postAuthorIdNum = typeof postAuthorId === 'string' ? parseInt(postAuthorId, 10) : Number(postAuthorId)
+      console.log('[canDeleteComment] Post owner check:', { userIdNum, postAuthorIdNum, postAuthorId })
       if (userIdNum === postAuthorIdNum && userIdNum > 0) return true
     }
 
@@ -1513,7 +1660,9 @@ export default function PostsManagement() {
 
       // Reload comments to get updated likes
       const comments = await fetchCommentsByPost(postId)
-      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
+      setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Không thể thích bình luận'
       setSnackbar({ open: true, message: errorMessage, severity: 'error' })
@@ -1546,7 +1695,7 @@ export default function PostsManagement() {
     return userIdNum === authorIdNum && userIdNum > 0
   }
 
-  const canDeleteReply = (reply: PostCommentReply) => {
+  const canDeleteReply = (reply: PostCommentReply, post?: PostDto) => {
     // Admin có thể delete bất kỳ reply nào
     if (isAdmin) return true
 
@@ -1564,11 +1713,21 @@ export default function PostsManagement() {
     const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : Number(userId)
     const authorIdNum = typeof replyAuthorId === 'string' ? parseInt(String(replyAuthorId), 10) : Number(replyAuthorId)
 
-    return userIdNum === authorIdNum && userIdNum > 0
+    // User có thể xóa reply của chính mình
+    if (userIdNum === authorIdNum && userIdNum > 0) return true
+
+    // Chủ bài post có thể xóa reply trong bài của mình
+    if (post) {
+      const postAuthorId = post.authorId ?? (post as any).AuthorId ?? (post as any).posterId ?? (post as any).PosterId ?? 0
+      const postAuthorIdNum = typeof postAuthorId === 'string' ? parseInt(postAuthorId, 10) : Number(postAuthorId)
+      if (userIdNum === postAuthorIdNum && userIdNum > 0) return true
+    }
+
+    return false
   }
 
-  const canEditOrDeleteReply = (reply: PostCommentReply) => {
-    return canEditReply(reply) || canDeleteReply(reply)
+  const canEditOrDeleteReply = (reply: PostCommentReply, post?: PostDto) => {
+    return canEditReply(reply) || canDeleteReply(reply, post)
   }
 
   // Handle edit reply
@@ -1594,7 +1753,9 @@ export default function PostsManagement() {
 
       // Reload comments
       const comments = await fetchCommentsByPost(postId)
-      setPostComments((prev) => ({ ...prev, [postId]: comments }))
+      // Filter ra các comments đã bị xóa trong session
+      const filteredComments = filterDeletedComments(comments)
+      setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
 
       // Clear editing state
       handleCancelEditReply(replyId)
@@ -1685,7 +1846,9 @@ export default function PostsManagement() {
       // Sau khi API thành công, reload comments để lấy dữ liệu chính xác từ backend
       try {
         const comments = await fetchCommentsByPost(postId)
-        setPostComments((prev) => ({ ...prev, [postId]: comments }))
+        // Filter ra các comments đã bị xóa trong session
+        const filteredComments = filterDeletedComments(comments)
+        setPostComments((prev) => ({ ...prev, [postId]: filteredComments }))
       } catch (reloadError) {
         console.warn('[PostsManagement] Could not reload comments after like, using optimistic update:', reloadError)
         // Giữ optimistic update nếu không reload được
@@ -1717,7 +1880,7 @@ export default function PostsManagement() {
   }
 
   // Recursive function to render reply and its nested replies
-  const renderReply = (reply: PostCommentReply, postId: number, depth: number = 0): React.ReactNode => {
+  const renderReply = (reply: PostCommentReply, postId: number, depth: number = 0, post?: PostDto): React.ReactNode => {
     const maxDepth = 3 // Giới hạn độ sâu để tránh UI quá phức tạp
     const marginLeft = Math.min(depth, maxDepth) * 2 // Tăng margin theo depth
 
@@ -1774,7 +1937,7 @@ export default function PostsManagement() {
                     <EditIcon sx={{ fontSize: 16 }} />
                   </IconButton>
                 )}
-                {canDeleteReply(reply) && (
+                {canDeleteReply(reply, post) && (
                   <IconButton
                     size="small"
                     onClick={() => handleDeleteReply(reply.replyPostCommentId, postId)}
@@ -1922,7 +2085,7 @@ export default function PostsManagement() {
         {/* Render nested replies recursively */}
         {reply.replies && reply.replies.length > 0 && (
           <Box mt={1} display="flex" flexDirection="column" gap={1}>
-            {reply.replies.map((nestedReply) => renderReply(nestedReply, postId, depth + 1))}
+            {reply.replies.map((nestedReply) => renderReply(nestedReply, postId, depth + 1, post))}
           </Box>
         )}
       </Box>
@@ -1940,118 +2103,201 @@ export default function PostsManagement() {
   }
 
   return (
-    <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100vh' }}>
+    <Box sx={{ p: 3, bgcolor: '#f8fafc', minHeight: '100vh' }}>
       {/* Header */}
-      <Box
-        display="flex"
-        justifyContent="space-between"
-        alignItems="center"
-        mb={3}
+      <Card
         sx={{
-          bgcolor: 'white',
-          p: 2,
-          borderRadius: 2,
-          boxShadow: 1
+          mb: 3,
+          borderRadius: '1.5rem',
+          boxShadow: '0 10px 40px rgba(15, 118, 110, 0.12)',
+          border: '1px solid rgba(148, 163, 184, 0.25)',
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.98), rgba(240,253,250,0.95))',
+          overflow: 'hidden'
         }}
       >
-        <Typography variant="h4" fontWeight="bold" color="text.primary">
-          Quản lý Bài viết
-        </Typography>
-        {isAuthenticated && (
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleOpenCreateDialog}
-            sx={{
-              borderRadius: 2,
-              bgcolor: 'primary.main',
-              '&:hover': {
-                bgcolor: 'primary.dark'
-              }
-            }}
-          >
-            Tạo bài viết mới
-          </Button>
-        )}
-      </Box>
-
-      {/* Search and Filter */}
-      <Box mb={3} display="flex" gap={2}>
-        <TextField
-          fullWidth
-          placeholder="Tìm kiếm bài viết..."
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            )
-          }}
+        <Box
           sx={{
-            borderRadius: 2,
-            bgcolor: 'white',
-            '& .MuiOutlinedInput-root': {
-              '&:hover fieldset': {
-                borderColor: 'primary.main'
-              }
-            }
+            background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #14b8a6 100%)',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
           }}
-        />
-        {isAdmin && (
-          <FormControl sx={{ minWidth: 150, bgcolor: 'white' }}>
-            <InputLabel>Trạng thái</InputLabel>
-            <Select
-              value={statusFilter}
-              label="Trạng thái"
-              onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <Box display="flex" alignItems="center" gap={2}>
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: '1rem',
+                bgcolor: 'rgba(255,255,255,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
             >
-              <MenuItem value="All">Tất cả</MenuItem>
-              <MenuItem value="Approved">Đã duyệt</MenuItem>
-              <MenuItem value="Rejected">Đã từ chối</MenuItem>
-            </Select>
-          </FormControl>
-        )}
-      </Box>
+              <ArticleIcon sx={{ color: 'white', fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 700, color: 'white' }}>
+                Quản lý Bài viết
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                Xem và quản lý các bài viết trên diễn đàn
+              </Typography>
+            </Box>
+          </Box>
+          {isAuthenticated && (
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={handleOpenCreateDialog}
+              sx={{
+                borderRadius: '0.8rem',
+                px: 3,
+                py: 1.2,
+                fontWeight: 600,
+                textTransform: 'none',
+                fontSize: '0.95rem',
+                bgcolor: 'transparent',
+                color: 'white',
+                border: '2px solid white',
+                boxShadow: '0 4px 14px rgba(255, 255, 255, 0.2)',
+                '&:hover': {
+                  bgcolor: 'rgba(255, 255, 255, 0.15)',
+                  borderColor: 'white',
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 6px 20px rgba(255, 255, 255, 0.3)'
+                }
+              }}
+            >
+              Tạo bài viết mới
+            </Button>
+          )}
+        </Box>
+
+        {/* Search and Filter */}
+        <CardContent sx={{ p: 2.5 }}>
+          <Box display="flex" gap={2}>
+            <TextField
+              fullWidth
+              placeholder="Tìm kiếm bài viết theo tiêu đề, nội dung, tác giả..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: '#64748b' }} />
+                  </InputAdornment>
+                ),
+                endAdornment: searchText && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setSearchText('')}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '1rem',
+                  bgcolor: '#f8fafc',
+                  border: '1.5px solid #94a3b8',
+                  '& fieldset': { border: 'none' },
+                  '&:hover': {
+                    bgcolor: '#f1f5f9',
+                    borderColor: '#0f766e'
+                  },
+                  '&.Mui-focused': {
+                    bgcolor: 'white',
+                    borderColor: '#0f766e',
+                    boxShadow: '0 0 0 3px rgba(15, 118, 110, 0.1)'
+                  }
+                }
+              }}
+            />
+          </Box>
+        </CardContent>
+      </Card>
 
       {/* Error Alert */}
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+        <Alert 
+          severity="error" 
+          sx={{ 
+            mb: 3, 
+            borderRadius: '1rem',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            bgcolor: '#fef2f2',
+            '& .MuiAlert-icon': { color: '#ef4444' },
+            '& .MuiAlert-message': { color: '#991b1b' }
+          }} 
+          onClose={() => setError(null)}
+        >
           {error}
         </Alert>
       )}
 
       {/* Posts List */}
       {filteredPosts.length === 0 ? (
-        <Card sx={{ bgcolor: 'white', borderRadius: 2, boxShadow: 1 }}>
-          <CardContent>
-            <Typography textAlign="center" color="text.secondary" py={4}>
-              {searchText || statusFilter !== 'All'
-                ? 'Không tìm thấy bài viết nào'
-                : 'Chưa có bài viết nào'}
-            </Typography>
+        <Card 
+          sx={{ 
+            borderRadius: '1.5rem',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+            border: '1px solid #e2e8f0'
+          }}
+        >
+          <CardContent sx={{ py: 6 }}>
+            <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
+              <Box
+                sx={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: '50%',
+                  bgcolor: '#f1f5f9',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <SearchIcon sx={{ fontSize: 40, color: '#94a3b8' }} />
+              </Box>
+              <Typography variant="h6" color="#64748b" fontWeight={600}>
+                {searchText || statusFilter !== 'All'
+                  ? 'Không tìm thấy bài viết nào'
+                  : 'Chưa có bài viết nào'}
+              </Typography>
+              <Typography variant="body2" color="#94a3b8">
+                {searchText || statusFilter !== 'All'
+                  ? 'Thử thay đổi từ khóa hoặc bộ lọc'
+                  : 'Hãy tạo bài viết đầu tiên của bạn'}
+              </Typography>
+            </Box>
           </CardContent>
         </Card>
       ) : (
-        <Box display="flex" flexDirection="column" gap={2}>
+        <Box display="flex" flexDirection="column" gap={2.5}>
           {filteredPosts.map((post) => (
             <Card
               key={post.postId}
               sx={{
-                borderRadius: 2,
+                borderRadius: '1.25rem',
                 bgcolor: 'white',
-                boxShadow: 2,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+                border: '1px solid #e2e8f0',
                 transition: 'all 0.3s ease',
+                overflow: 'hidden',
                 '&:hover': {
-                  boxShadow: 4,
-                  transform: 'translateY(-2px)'
+                  boxShadow: '0 8px 30px rgba(15, 118, 110, 0.12)',
+                  borderColor: '#cbd5e1',
+                  transform: 'translateY(-3px)'
                 }
               }}
             >
               <CardContent sx={{ p: 3 }}>
                 {/* Header */}
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2.5}>
                   <Box display="flex" gap={2} alignItems="center">
                     <Avatar
                       src={(() => {
@@ -2087,11 +2333,13 @@ export default function PostsManagement() {
                         return post.authorAvatar
                       })()}
                       sx={{
-                        width: 56,
-                        height: 56,
-                        bgcolor: 'primary.main',
-                        fontSize: '1.5rem',
-                        fontWeight: 'bold'
+                        width: 52,
+                        height: 52,
+                        bgcolor: '#0f766e',
+                        fontSize: '1.4rem',
+                        fontWeight: 'bold',
+                        border: '3px solid #e2e8f0',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                       }}
                     >
                       {post.authorName.charAt(0).toUpperCase()}
@@ -2099,29 +2347,44 @@ export default function PostsManagement() {
                     <Box>
                       <Typography
                         variant="subtitle1"
-                        fontWeight="bold"
-                        color="text.primary"
-                        mb={0.5}
+                        sx={{ fontWeight: 700, color: '#1e293b', mb: 0.5, fontSize: '1.05rem' }}
                       >
                         {post.authorName}
                       </Typography>
-                      <Box display="flex" gap={1} alignItems="center">
+                      <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
                         <Chip
                           label={post.authorRole}
                           size="small"
-                          color={getRoleColor(post.authorRole)}
-                          sx={{ fontWeight: 'medium' }}
+                          sx={{
+                            fontWeight: 600,
+                            fontSize: '0.7rem',
+                            height: '22px',
+                            bgcolor: getRoleColor(post.authorRole) === 'primary' ? 'rgba(59, 130, 246, 0.1)' :
+                                    getRoleColor(post.authorRole) === 'info' ? 'rgba(6, 182, 212, 0.1)' :
+                                    getRoleColor(post.authorRole) === 'secondary' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                            color: getRoleColor(post.authorRole) === 'primary' ? '#2563eb' :
+                                   getRoleColor(post.authorRole) === 'info' ? '#0891b2' :
+                                   getRoleColor(post.authorRole) === 'secondary' ? '#9333ea' : '#64748b'
+                          }}
                         />
                         <Chip
-                          label={post.status}
+                          label={post.status === 'Approved' ? 'Đã duyệt' : post.status === 'Rejected' ? 'Đã từ chối' : post.status}
                           size="small"
-                          color={getStatusColor(post.status)}
-                          sx={{ fontWeight: 'medium' }}
+                          sx={{
+                            fontWeight: 600,
+                            fontSize: '0.7rem',
+                            height: '22px',
+                            bgcolor: getStatusColor(post.status) === 'success' ? 'rgba(34, 197, 94, 0.1)' :
+                                    getStatusColor(post.status) === 'error' ? 'rgba(239, 68, 68, 0.1)' :
+                                    getStatusColor(post.status) === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                            color: getStatusColor(post.status) === 'success' ? '#16a34a' :
+                                   getStatusColor(post.status) === 'error' ? '#dc2626' :
+                                   getStatusColor(post.status) === 'warning' ? '#d97706' : '#64748b'
+                          }}
                         />
                         <Typography
                           variant="caption"
-                          color="text.secondary"
-                          sx={{ fontSize: '0.875rem' }}
+                          sx={{ color: '#94a3b8', fontSize: '0.8rem' }}
                         >
                           {formatTimeAgo(post.publicDate || post.createdAt, post.postId)}
                         </Typography>
@@ -2132,7 +2395,14 @@ export default function PostsManagement() {
                     <IconButton
                       size="small"
                       onClick={(e) => handleMenuOpen(e, post.postId)}
-                      sx={{ color: 'text.secondary' }}
+                      sx={{ 
+                        color: '#64748b',
+                        bgcolor: '#f1f5f9',
+                        '&:hover': {
+                          bgcolor: '#e2e8f0',
+                          color: '#334155'
+                        }
+                      }}
                     >
                       <MoreVertIcon />
                     </IconButton>
@@ -2141,7 +2411,16 @@ export default function PostsManagement() {
 
                 {/* Title */}
                 {post.title && (
-                  <Typography variant="h6" fontWeight="bold" color="text.primary" mb={1}>
+                  <Typography 
+                    variant="h6" 
+                    sx={{ 
+                      fontWeight: 700, 
+                      color: '#1e293b', 
+                      mb: 1.5,
+                      fontSize: '1.15rem',
+                      lineHeight: 1.4
+                    }}
+                  >
                     {post.title}
                   </Typography>
                 )}
@@ -2150,11 +2429,11 @@ export default function PostsManagement() {
                 <Typography
                   variant="body1"
                   sx={{
-                    mb: 2,
+                    mb: 2.5,
                     whiteSpace: 'pre-wrap',
-                    color: 'text.primary',
-                    lineHeight: 1.7,
-                    fontSize: '1rem'
+                    color: '#475569',
+                    lineHeight: 1.75,
+                    fontSize: '0.95rem'
                   }}
                 >
                   {post.content}
@@ -2162,8 +2441,8 @@ export default function PostsManagement() {
 
                 {/* Images */}
                 {post.images && post.images.length > 0 && (
-                  <Box mb={2}>
-                    <ImageList cols={3} gap={8} sx={{ mb: 0 }}>
+                  <Box mb={2.5}>
+                    <ImageList cols={post.images.length === 1 ? 1 : post.images.length === 2 ? 2 : 3} gap={12} sx={{ mb: 0 }}>
                       {post.images
                         .filter((img) => {
                           if (!img || typeof img !== 'string') return false
@@ -2203,11 +2482,12 @@ export default function PostsManagement() {
                                 alt={`Post ${post.postId} - ${index + 1}`}
                                 style={{
                                   width: '100%',
-                                  height: '200px',
+                                  height: post.images.length === 1 ? '350px' : '200px',
                                   objectFit: 'cover',
-                                  borderRadius: '12px',
-                                  border: '2px solid #e0e0e0',
-                                  backgroundColor: '#f5f5f5'
+                                  borderRadius: '1rem',
+                                  border: '2px solid #e2e8f0',
+                                  backgroundColor: '#f8fafc',
+                                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
                                 }}
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none'
@@ -2224,25 +2504,40 @@ export default function PostsManagement() {
 
                 {/* Hashtags */}
                 {post.hashtags && post.hashtags.length > 0 && (
-                  <Box mb={2} display="flex" flexWrap="wrap" gap={1}>
+                  <Box mb={2.5} display="flex" flexWrap="wrap" gap={1}>
                     {post.hashtags.map((tag, index) => (
                       <Chip
                         key={index}
                         label={`#${tag}`}
                         size="small"
-                        variant="outlined"
-                        sx={{ fontSize: '0.75rem' }}
+                        sx={{ 
+                          fontSize: '0.8rem',
+                          fontWeight: 500,
+                          bgcolor: 'rgba(15, 118, 110, 0.08)',
+                          color: '#0f766e',
+                          border: '1px solid rgba(15, 118, 110, 0.2)',
+                          '&:hover': {
+                            bgcolor: 'rgba(15, 118, 110, 0.15)'
+                          }
+                        }}
                       />
                     ))}
                   </Box>
                 )}
 
-                <Divider sx={{ my: 2, bgcolor: 'grey.200' }} />
-
-                <Divider sx={{ my: 2, bgcolor: 'grey.200' }} />
-
                 {/* Actions - Reaction button + comments */}
-                <Box display="flex" alignItems="center" gap={2} mb={2}>
+                <Box
+                  display="flex"
+                  alignItems="center"
+                  gap={2.5}
+                  mb={2}
+                  sx={{
+                    p: 1.5,
+                    bgcolor: '#f8fafc',
+                    borderRadius: '0.75rem',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
                   {/* Nút reaction chính (giống Facebook like) + popup nhiều reaction khi hover */}
                   <Box
                     position="relative"
@@ -2250,43 +2545,49 @@ export default function PostsManagement() {
                     onMouseLeave={() => scheduleHideReactionMenu(post.postId)}
                   >
                     {/* Nút chính - hiển thị reaction hiện tại của user (nếu có) */}
-                    <IconButton
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        handleReactionClick(post, 'like')
-                      }}
-                      disabled={likingPosts.has(post.postId)}
-                      title={
-                        !isAuthenticated
-                          ? 'Vui lòng đăng nhập để bày tỏ cảm xúc'
-                          : post.isLiked
-                            ? 'Bỏ cảm xúc'
-                            : 'Thích'
-                      }
-                      sx={{
-                        color: post.isLiked ? 'error.main' : 'text.secondary',
-                        opacity: !isAuthenticated ? 0.5 : 1,
-                        cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
-                        '&:hover': {
-                          bgcolor: post.isLiked ? 'error.light' : 'grey.100',
-                          color: post.isLiked ? 'error.dark' : 'error.main'
-                        },
-                        '&.Mui-disabled': {
-                          opacity: 0.3
-                        }
-                      }}
-                    >
-                      {(() => {
-                        const userReaction = getCurrentUserReaction(post)
-                        const display = getReactionDisplay(userReaction)
-                        return (
+                    {(() => {
+                      const userReaction = getCurrentUserReaction(post)
+                      const hasReaction = userReaction !== null
+                      const display = getReactionDisplay(userReaction)
+                      return (
+                        <IconButton
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            // Nếu đã có reaction, bấm nút chính sẽ unlike (gửi reaction hiện tại để toggle off)
+                            // Nếu chưa có reaction, bấm nút chính sẽ like
+                            handleReactionClick(post, userReaction ?? 'like')
+                          }}
+                          disabled={likingPosts.has(post.postId)}
+                          title={
+                            !isAuthenticated
+                              ? 'Vui lòng đăng nhập để bày tỏ cảm xúc'
+                              : hasReaction
+                                ? 'Bỏ cảm xúc'
+                                : 'Thích'
+                          }
+                          sx={{
+                            color: hasReaction ? '#ef4444' : '#64748b',
+                            opacity: !isAuthenticated ? 0.5 : 1,
+                            cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
+                            bgcolor: hasReaction ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                            '&:hover': {
+                              bgcolor: hasReaction
+                                ? 'rgba(239, 68, 68, 0.15)'
+                                : 'rgba(100, 116, 139, 0.1)',
+                              color: hasReaction ? '#dc2626' : '#ef4444'
+                            },
+                            '&.Mui-disabled': {
+                              opacity: 0.3
+                            }
+                          }}
+                        >
                           <span style={{ fontSize: '1.6rem' }} aria-label={display.label}>
                             {display.emoji}
                           </span>
-                        )
-                      })()}
-                    </IconButton>
+                        </IconButton>
+                      )
+                    })()}
 
                     {/* Popup reaction khi hover */}
                     {reactionMenuPostId === post.postId && (
@@ -2295,17 +2596,16 @@ export default function PostsManagement() {
                           position: 'absolute',
                           bottom: '100%',
                           left: 0,
-                          mb: 0.5,
-                          px: 0.75,
-                          py: 0.5,
-                          bgcolor: 'background.paper',
-                          borderRadius: 999,
-                          boxShadow: 3,
+                          mb: 0.75,
+                          px: 1,
+                          py: 0.75,
+                          bgcolor: 'white',
+                          borderRadius: '2rem',
+                          boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
                           display: 'flex',
                           gap: 0.5,
                           zIndex: 10,
-                          border: '1px solid',
-                          borderColor: 'divider'
+                          border: '1px solid #e2e8f0'
                         }}
                       >
                         {REACTIONS.map((reaction) => (
@@ -2318,9 +2618,14 @@ export default function PostsManagement() {
                               handleReactionClick(post, reaction.key)
                             }}
                             sx={{
-                              width: 32,
-                              height: 32,
-                              fontSize: '1.2rem'
+                              width: 36,
+                              height: 36,
+                              fontSize: '1.3rem',
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                transform: 'scale(1.3)',
+                                bgcolor: 'rgba(15, 118, 110, 0.1)'
+                              }
                             }}
                           >
                             <span aria-label={reaction.label}>{reaction.emoji}</span>
@@ -2332,24 +2637,24 @@ export default function PostsManagement() {
 
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    fontWeight="medium"
+                    sx={{
+                      color: '#64748b',
+                      fontWeight: 600,
+                      cursor: post.likesCount > 0 ? 'pointer' : 'default',
+                      '&:hover':
+                        post.likesCount > 0
+                          ? {
+                              textDecoration: 'underline',
+                              color: '#0f766e'
+                            }
+                          : {}
+                    }}
                     onClick={() => {
                       if (post.likesCount > 0) {
                         setSelectedPostLikes(post.likes || [])
                         setSelectedPostTitle(post.title || 'Bài viết')
                         setLikesDialogOpen(true)
                       }
-                    }}
-                    sx={{
-                      cursor: post.likesCount > 0 ? 'pointer' : 'default',
-                      '&:hover':
-                        post.likesCount > 0
-                          ? {
-                              textDecoration: 'underline',
-                              color: 'primary.main'
-                            }
-                          : {}
                     }}
                   >
                     {post.likesCount} lượt thích
@@ -2358,25 +2663,36 @@ export default function PostsManagement() {
                   <IconButton
                     onClick={() => handleToggleComments(post.postId)}
                     sx={{
-                      color: 'text.secondary',
+                      color: expandedComments.has(post.postId) ? '#0f766e' : '#64748b',
+                      bgcolor: expandedComments.has(post.postId) ? 'rgba(15, 118, 110, 0.1)' : 'transparent',
                       '&:hover': {
-                        bgcolor: 'action.hover'
+                        bgcolor: 'rgba(15, 118, 110, 0.15)',
+                        color: '#0f766e'
                       }
                     }}
                   >
                     <CommentIcon />
                   </IconButton>
-                  <Typography variant="body2" color="text.secondary">
-                    {post.commentsCount} bình luận
+                  <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
+                    {postComments[post.postId] ? countTotalComments(postComments[post.postId]) : post.commentsCount} bình luận
                   </Typography>
                 </Box>
 
                 {/* Comments Section */}
                 {expandedComments.has(post.postId) && (
-                  <Box sx={{ mt: 2, pl: 2, borderLeft: '2px solid', borderColor: 'divider' }}>
+                  <Box sx={{ 
+                    mt: 2.5, 
+                    pl: 2.5, 
+                    borderLeft: '3px solid', 
+                    borderColor: '#0f766e',
+                    bgcolor: '#f8fafc',
+                    borderRadius: '0 0.75rem 0.75rem 0',
+                    py: 2,
+                    pr: 2
+                  }}>
                     {/* Comment Input */}
                     {isAuthenticated && (
-                      <Box display="flex" gap={1} mb={2}>
+                      <Box display="flex" gap={1.5} mb={2.5}>
                         <TextField
                           fullWidth
                           size="small"
@@ -2391,17 +2707,41 @@ export default function PostsManagement() {
                               handleCreateComment(post.postId)
                             }
                           }}
-                          sx={{ bgcolor: 'background.default' }}
+                          sx={{ 
+                            bgcolor: 'white',
+                            '& .MuiOutlinedInput-root': {
+                              borderRadius: '0.75rem',
+                              border: '1.5px solid #94a3b8',
+                              '& fieldset': { border: 'none' },
+                              '&:hover': {
+                                borderColor: '#0f766e'
+                              },
+                              '&.Mui-focused': {
+                                borderColor: '#0f766e',
+                                boxShadow: '0 0 0 3px rgba(15, 118, 110, 0.1)'
+                              }
+                            }
+                          }}
                         />
                         <IconButton
-                          color="primary"
                           onClick={() => handleCreateComment(post.postId)}
                           disabled={
                             !commentTexts[post.postId]?.trim() || creatingComment[post.postId]
                           }
+                          sx={{
+                            bgcolor: '#0f766e',
+                            color: 'white',
+                            '&:hover': {
+                              bgcolor: '#0d9488'
+                            },
+                            '&.Mui-disabled': {
+                              bgcolor: '#cbd5e1',
+                              color: 'white'
+                            }
+                          }}
                         >
                           {creatingComment[post.postId] ? (
-                            <CircularProgress size={20} />
+                            <CircularProgress size={20} sx={{ color: 'white' }} />
                           ) : (
                             <SendIcon />
                           )}
@@ -2419,7 +2759,13 @@ export default function PostsManagement() {
                           return (
                             <Box
                               key={commentId}
-                              sx={{ bgcolor: 'background.default', p: 1.5, borderRadius: 1 }}
+                              sx={{ 
+                                bgcolor: 'white', 
+                                p: 2, 
+                                borderRadius: '0.75rem',
+                                border: '1px solid #e2e8f0',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                              }}
                             >
                               <Box
                                 display="flex"
@@ -2625,7 +2971,7 @@ export default function PostsManagement() {
                                   {/* Display Replies */}
                                   {comment.replies && comment.replies.length > 0 && (
                                     <Box mt={1.5} ml={4} display="flex" flexDirection="column" gap={1.5}>
-                                      {comment.replies.map((reply) => renderReply(reply, post.postId, 0))}
+                                      {comment.replies.map((reply) => renderReply(reply, post.postId, 0, post))}
                                     </Box>
                                   )}
                                 </>
@@ -2691,14 +3037,37 @@ export default function PostsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)'
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 50%, #14b8a6 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(15, 118, 110, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Tạo bài viết mới
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
           <TextField
             fullWidth
             label="Tiêu đề"
@@ -2706,12 +3075,23 @@ export default function PostsManagement() {
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             sx={{
-              mb: 2,
-              bgcolor: 'white',
+              mb: 2.5,
+              mt: 2,
               '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'primary.main'
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#0f766e'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#0f766e',
+                  boxShadow: '0 0 0 3px rgba(15, 118, 110, 0.1)'
                 }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#0f766e'
               }
             }}
           />
@@ -2724,16 +3104,26 @@ export default function PostsManagement() {
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
             sx={{
-              mb: 2,
-              bgcolor: 'white',
+              mb: 2.5,
               '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'primary.main'
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#0f766e'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#0f766e',
+                  boxShadow: '0 0 0 3px rgba(15, 118, 110, 0.1)'
                 }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#0f766e'
               }
             }}
           />
-          <Box mb={2}>
+          <Box mb={2.5}>
             <input
               accept="image/*"
               style={{ display: 'none' }}
@@ -2748,12 +3138,21 @@ export default function PostsManagement() {
                 component="span"
                 startIcon={<ImageIcon />}
                 sx={{
-                  borderColor: 'primary.main',
-                  color: 'primary.main',
+                  borderRadius: '0.75rem',
+                  borderWidth: 2,
+                  borderColor: '#0f766e',
+                  color: '#0f766e',
+                  px: 3,
+                  py: 1.2,
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
                   '&:hover': {
-                    borderColor: 'primary.dark',
-                    bgcolor: 'primary.light',
-                    color: 'white'
+                    borderWidth: 2,
+                    borderColor: '#0d9488',
+                    background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
+                    color: 'white',
+                    transform: 'translateY(-2px)',
+                    boxShadow: '0 4px 12px rgba(15, 118, 110, 0.3)'
                   }
                 }}
               >
@@ -2762,7 +3161,7 @@ export default function PostsManagement() {
             </label>
           </Box>
           {newImagePreviews.length > 0 && (
-            <Box display="flex" flexWrap="wrap" gap={1} mb={2}>
+            <Box display="flex" flexWrap="wrap" gap={1.5} mb={2.5}>
               {newImagePreviews.map((preview, index) => (
                 <Box
                   key={index}
@@ -2770,10 +3169,15 @@ export default function PostsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: '0.75rem',
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'primary.light'
+                    border: '3px solid #14b8a6',
+                    boxShadow: '0 4px 12px rgba(15, 118, 110, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(15, 118, 110, 0.25)'
+                    }
                   }}
                 >
                   <img
@@ -2790,13 +3194,17 @@ export default function PostsManagement() {
                     onClick={() => removeNewImage(index)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
+                      top: 6,
+                      right: 6,
                       bgcolor: 'error.main',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(211, 47, 47, 0.4)',
                       '&:hover': {
                         bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(211, 47, 47, 0.5)'
                       }
                     }}
                   >
@@ -2807,8 +3215,22 @@ export default function PostsManagement() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseCreateDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseCreateDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -2818,16 +3240,25 @@ export default function PostsManagement() {
               creating || (!newTitle.trim() && !newContent.trim() && newImages.length === 0)
             }
             sx={{
-              bgcolor: 'primary.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
+              boxShadow: '0 4px 12px rgba(15, 118, 110, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'primary.dark'
+                background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(15, 118, 110, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
-            {creating ? <CircularProgress size={20} color="inherit" /> : 'Tạo'}
+            {creating ? <CircularProgress size={20} color="inherit" /> : 'Tạo bài viết'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -2840,14 +3271,37 @@ export default function PostsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)'
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'secondary.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 50%, #a78bfa 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(124, 58, 237, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Chỉnh sửa bài viết
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
           <TextField
             fullWidth
             label="Tiêu đề"
@@ -2855,12 +3309,23 @@ export default function PostsManagement() {
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
             sx={{
-              mb: 2,
-              bgcolor: 'white',
+              mb: 2.5,
+              mt: 2,
               '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'secondary.main'
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#7c3aed'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#7c3aed',
+                  boxShadow: '0 0 0 3px rgba(124, 58, 237, 0.1)'
                 }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#7c3aed'
               }
             }}
           />
@@ -2873,16 +3338,26 @@ export default function PostsManagement() {
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             sx={{
-              mb: 2,
-              bgcolor: 'white',
+              mb: 2.5,
               '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'secondary.main'
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#7c3aed'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#7c3aed',
+                  boxShadow: '0 0 0 3px rgba(124, 58, 237, 0.1)'
                 }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#7c3aed'
               }
             }}
           />
-          <Box mb={2}>
+          <Box mb={2.5}>
             <input
               accept="image/*"
               style={{ display: 'none' }}
@@ -2897,12 +3372,21 @@ export default function PostsManagement() {
                 component="span"
                 startIcon={<ImageIcon />}
                 sx={{
-                  borderColor: 'secondary.main',
-                  color: 'secondary.main',
+                  borderRadius: '0.75rem',
+                  borderWidth: 2,
+                  borderColor: '#7c3aed',
+                  color: '#7c3aed',
+                  px: 3,
+                  py: 1.2,
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
                   '&:hover': {
-                    borderColor: 'secondary.dark',
-                    bgcolor: 'secondary.light',
-                    color: 'white'
+                    borderWidth: 2,
+                    borderColor: '#8b5cf6',
+                    background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)',
+                    color: 'white',
+                    transform: 'translateY(-2px)',
+                    boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)'
                   }
                 }}
               >
@@ -2911,7 +3395,7 @@ export default function PostsManagement() {
             </label>
           </Box>
           {(editImages.length > 0 || editNewImagePreviews.length > 0) && (
-            <Box display="flex" flexWrap="wrap" gap={1} mb={2}>
+            <Box display="flex" flexWrap="wrap" gap={1.5} mb={2.5}>
               {editImages.map((image, index) => (
                 <Box
                   key={`existing-${index}`}
@@ -2919,10 +3403,15 @@ export default function PostsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: '0.75rem',
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'secondary.light'
+                    border: '3px solid #a78bfa',
+                    boxShadow: '0 4px 12px rgba(124, 58, 237, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(124, 58, 237, 0.25)'
+                    }
                   }}
                 >
                   <img
@@ -2943,13 +3432,17 @@ export default function PostsManagement() {
                     onClick={() => removeEditImage(index, false)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
+                      top: 6,
+                      right: 6,
                       bgcolor: 'error.main',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(211, 47, 47, 0.4)',
                       '&:hover': {
                         bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(211, 47, 47, 0.5)'
                       }
                     }}
                   >
@@ -2964,10 +3457,15 @@ export default function PostsManagement() {
                   sx={{
                     width: 120,
                     height: 120,
-                    borderRadius: 2,
+                    borderRadius: '0.75rem',
                     overflow: 'hidden',
-                    border: '2px solid',
-                    borderColor: 'primary.light'
+                    border: '3px solid #14b8a6',
+                    boxShadow: '0 4px 12px rgba(15, 118, 110, 0.15)',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 20px rgba(15, 118, 110, 0.25)'
+                    }
                   }}
                 >
                   <img
@@ -2984,13 +3482,17 @@ export default function PostsManagement() {
                     onClick={() => removeEditImage(index, true)}
                     sx={{
                       position: 'absolute',
-                      top: 4,
-                      right: 4,
-                      bgcolor: 'error.main',
+                      top: 6,
+                      right: 6,
+                      bgcolor: '#ef4444',
                       color: 'white',
+                      width: 28,
+                      height: 28,
+                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)',
                       '&:hover': {
-                        bgcolor: 'error.dark',
-                        transform: 'scale(1.1)'
+                        bgcolor: '#dc2626',
+                        transform: 'scale(1.15)',
+                        boxShadow: '0 4px 12px rgba(239, 68, 68, 0.5)'
                       }
                     }}
                   >
@@ -3001,8 +3503,22 @@ export default function PostsManagement() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseEditDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseEditDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -3016,16 +3532,25 @@ export default function PostsManagement() {
                 editNewImages.length === 0)
             }
             sx={{
-              bgcolor: 'secondary.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'secondary.dark'
+                background: 'linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(124, 58, 237, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
-            {updating ? <CircularProgress size={20} color="inherit" /> : 'Lưu'}
+            {updating ? <CircularProgress size={20} color="inherit" /> : 'Lưu thay đổi'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3036,20 +3561,69 @@ export default function PostsManagement() {
         onClose={handleCloseDeleteDialog}
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #fef2f2 100%)',
+            minWidth: 400
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Xác nhận xóa
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
-          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem' }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
+          <DialogContentText
+            sx={{
+              color: '#1e293b',
+              fontSize: '1rem',
+              lineHeight: 1.6,
+              p: 2,
+              mt: 1,
+              bgcolor: 'rgba(239, 68, 68, 0.05)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(239, 68, 68, 0.15)'
+            }}
+          >
             Bạn có chắc chắn muốn xóa bài viết này? Hành động này không thể hoàn tác.
           </DialogContentText>
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseDeleteDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseDeleteDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -3057,12 +3631,21 @@ export default function PostsManagement() {
             variant="contained"
             disabled={deleting}
             sx={{
-              bgcolor: 'error.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'error.dark'
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(239, 68, 68, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
@@ -3079,17 +3662,51 @@ export default function PostsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #fef2f2 100%)'
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(239, 68, 68, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Xóa bài viết của người khác
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
-          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem', mb: 2 }}>
-            Bạn đang xóa bài viết của <strong>{deletingPostWithReason?.authorName}</strong>. 
-            Vui lòng nhập lý do để thông báo cho họ.
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
+          <DialogContentText
+            sx={{
+              color: '#1e293b',
+              fontSize: '1rem',
+              mb: 2.5,
+              mt: 1,
+              p: 2,
+              bgcolor: 'rgba(239, 68, 68, 0.05)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(239, 68, 68, 0.15)'
+            }}
+          >
+            Bạn đang xóa bài viết của <strong>{deletingPostWithReason?.authorName}</strong>. Vui
+            lòng nhập lý do để thông báo cho họ.
           </DialogContentText>
           <TextField
             fullWidth
@@ -3104,10 +3721,42 @@ export default function PostsManagement() {
             }}
             error={!!deletePostReasonError}
             helperText={deletePostReasonError}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#ef4444'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#ef4444',
+                  boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.1)'
+                }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#ef4444'
+              }
+            }}
           />
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseDeletePostReasonDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseDeletePostReasonDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -3115,12 +3764,21 @@ export default function PostsManagement() {
             variant="contained"
             disabled={deleting}
             sx={{
-              bgcolor: 'error.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+              boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'error.dark'
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(239, 68, 68, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
@@ -3135,20 +3793,69 @@ export default function PostsManagement() {
         onClose={handleCloseApproveDialog}
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%)',
+            minWidth: 400
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'success.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(34, 197, 94, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Duyệt bài viết
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
-          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem' }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
+          <DialogContentText
+            sx={{
+              color: '#1e293b',
+              fontSize: '1rem',
+              lineHeight: 1.6,
+              p: 2,
+              mt: 1,
+              bgcolor: 'rgba(34, 197, 94, 0.05)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(34, 197, 94, 0.15)'
+            }}
+          >
             Bạn có chắc chắn muốn duyệt bài viết này?
           </DialogContentText>
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseApproveDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseApproveDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -3156,12 +3863,21 @@ export default function PostsManagement() {
             variant="contained"
             disabled={reviewing}
             sx={{
-              bgcolor: 'success.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+              boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'success.dark'
+                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(34, 197, 94, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
@@ -3178,15 +3894,49 @@ export default function PostsManagement() {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2
+            borderRadius: '1.5rem',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #fff7ed 100%)'
           }
         }}
       >
-        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold' }}>
+        <DialogTitle
+          sx={{
+            background: 'linear-gradient(135deg, #f97316 0%, #ea580c 50%, #c2410c 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '1.25rem',
+            py: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            boxShadow: '0 4px 20px rgba(249, 115, 22, 0.3)',
+            '&::before': {
+              content: '""',
+              width: 4,
+              height: 28,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.5)'
+            }
+          }}
+        >
           Từ chối bài viết
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: 'background.default', pt: 3 }}>
-          <DialogContentText sx={{ color: 'text.primary', fontSize: '1rem', mb: 2 }}>
+        <DialogContent sx={{ bgcolor: 'transparent', pt: 4, px: 3 }}>
+          <DialogContentText
+            sx={{
+              color: '#1e293b',
+              fontSize: '1rem',
+              mb: 2.5,
+              mt: 1,
+              p: 2,
+              bgcolor: 'rgba(249, 115, 22, 0.05)',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(249, 115, 22, 0.15)'
+            }}
+          >
             Vui lòng nhập lý do từ chối:
           </DialogContentText>
           <TextField
@@ -3197,17 +3947,41 @@ export default function PostsManagement() {
             value={rejectComment}
             onChange={(e) => setRejectComment(e.target.value)}
             sx={{
-              bgcolor: 'white',
               '& .MuiOutlinedInput-root': {
-                '&:hover fieldset': {
-                  borderColor: 'error.main'
+                borderRadius: '0.75rem',
+                bgcolor: 'white',
+                border: '1.5px solid #94a3b8',
+                '& fieldset': { border: 'none' },
+                '&:hover': {
+                  borderColor: '#f97316'
+                },
+                '&.Mui-focused': {
+                  borderColor: '#f97316',
+                  boxShadow: '0 0 0 3px rgba(249, 115, 22, 0.1)'
                 }
+              },
+              '& .MuiInputLabel-root.Mui-focused': {
+                color: '#f97316'
               }
             }}
           />
         </DialogContent>
-        <DialogActions sx={{ bgcolor: 'background.default', px: 3, pb: 2 }}>
-          <Button onClick={handleCloseRejectDialog} sx={{ color: 'text.secondary' }}>
+        <DialogActions sx={{ bgcolor: 'transparent', px: 3, pb: 3, pt: 1, gap: 1.5 }}>
+          <Button
+            onClick={handleCloseRejectDialog}
+            sx={{
+              color: '#64748b',
+              borderRadius: '0.75rem',
+              px: 3,
+              py: 1,
+              fontWeight: 600,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: '#f1f5f9',
+                color: '#334155'
+              }
+            }}
+          >
             Hủy
           </Button>
           <Button
@@ -3215,12 +3989,21 @@ export default function PostsManagement() {
             variant="contained"
             disabled={reviewing || !rejectComment.trim()}
             sx={{
-              bgcolor: 'error.main',
+              borderRadius: '0.75rem',
+              px: 4,
+              py: 1,
+              fontWeight: 600,
+              background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+              boxShadow: '0 4px 12px rgba(249, 115, 22, 0.3)',
+              transition: 'all 0.2s ease',
               '&:hover': {
-                bgcolor: 'error.dark'
+                background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(249, 115, 22, 0.4)'
               },
               '&:disabled': {
-                bgcolor: 'grey.300'
+                background: 'linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)',
+                boxShadow: 'none'
               }
             }}
           >
@@ -3283,6 +4066,7 @@ export default function PostsManagement() {
                     }}
                   >
                     <Avatar
+                      src={like.avatar || undefined}
                       sx={{
                         width: 40,
                         height: 40,
@@ -3472,11 +4256,48 @@ export default function PostsManagement() {
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={3000}
+        autoHideDuration={4000}
         onClose={() => setSnackbar({ open: false, message: '' })}
-        message={snackbar.message}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      />
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ open: false, message: '' })}
+          severity={snackbar.severity || 'success'}
+          sx={{
+            borderRadius: '0.75rem',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+            minWidth: '300px',
+            ...(snackbar.severity === 'success' && {
+              bgcolor: '#f0fdf4',
+              color: '#166534',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              '& .MuiAlert-icon': { color: '#22c55e' }
+            }),
+            ...(snackbar.severity === 'error' && {
+              bgcolor: '#fef2f2',
+              color: '#991b1b',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              '& .MuiAlert-icon': { color: '#ef4444' }
+            }),
+            ...(snackbar.severity === 'warning' && {
+              bgcolor: '#fffbeb',
+              color: '#92400e',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              '& .MuiAlert-icon': { color: '#f59e0b' }
+            }),
+            ...(snackbar.severity === 'info' && {
+              bgcolor: '#eff6ff',
+              color: '#1e40af',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              '& .MuiAlert-icon': { color: '#3b82f6' }
+            })
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }
+
+

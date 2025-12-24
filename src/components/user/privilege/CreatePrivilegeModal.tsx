@@ -21,7 +21,7 @@ interface CreatePrivilegeModalProps {
   hostId: number | null;
   onSuccess?: (message: string) => void;
   onError?: (message: string) => void;
-  onCreated?: () => void;
+  onCreated?: (newPromotion: any) => void;
 }
 
 const CreatePrivilegeModal: React.FC<CreatePrivilegeModalProps> = ({
@@ -166,12 +166,12 @@ const CreatePrivilegeModal: React.FC<CreatePrivilegeModalProps> = ({
       }
       submitData.append('TargetAudience', JSON.stringify(targetAudience));
 
-      await axiosInstance.post(`${API_ENDPOINTS.BONUS_SERVICE}`, submitData, {
+      const response = await axiosInstance.post(`${API_ENDPOINTS.BONUS_SERVICE}`, submitData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
       if (onSuccess) onSuccess('Tạo ưu đãi thành công!');
-      if (onCreated) onCreated();
+      if (onCreated) onCreated(response.data);
       handleClose();
     } catch (err: any) {
       console.error('Error creating bonus service:', err);

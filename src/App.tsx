@@ -3,6 +3,8 @@ import { Suspense, lazy } from 'react'
 import { NotificationProvider } from './contexts/NotificationContext'
 import LoadingSpinner from './components/common/LoadingSpinner'
 import ProtectedRoute from './components/common/ProtectedRoute'
+import { useAccountStatus } from './hooks/useAccountStatus'
+import { useRoleUpgradeNotification } from './hooks/useRoleUpgradeNotification'
 
 // ==================== ADMIN COMPONENTS ====================
 // Lazy load MainLayout - Admin dashboard layout
@@ -73,12 +75,29 @@ const ReviewManager = lazy(() => import('~/components/user/ReviewManager'))
 // User Support component
 const Support = lazy(() => import('~/components/user/support/Support'))
 
+// Component để kiểm tra trạng thái tài khoản
+const AccountStatusChecker = () => {
+  useAccountStatus()
+  return null
+}
+
+// Component để kiểm tra và thông báo khi role được nâng cấp
+const RoleUpgradeChecker = () => {
+  useRoleUpgradeNotification()
+  return null
+}
 
 function App() {
   return (
     <NotificationProvider>
       <BrowserRouter>
         <Suspense fallback={<LoadingSpinner />}>
+          {/* Kiểm tra trạng thái tài khoản định kỳ */}
+          <AccountStatusChecker />
+          
+          {/* Kiểm tra và thông báo khi role được nâng cấp */}
+          <RoleUpgradeChecker />
+          
           {/* Support chat widget - hiển thị trên tất cả trang user */}
           <Suspense fallback={null}>
             <Support />

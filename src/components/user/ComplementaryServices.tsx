@@ -265,21 +265,8 @@ const ComplementaryServices = ({
     }
   }, [allServices, selectedServices, onSelectionChange])
 
-  // Auto-select eligible services when services are loaded
-  useEffect(() => {
-    if (allServices.length > 0 && selectedServices.length === 0) {
-      // Sử dụng maxSelectableProp nếu có, nếu không thì dùng maxSelectableByTier
-      const maxSelectable = maxSelectableProp ?? maxSelectableByTier[userTier]
-      const eligibleServices = allServices
-        .filter(s => s.isEligible)
-        .slice(0, maxSelectable)
-        .map(s => s.id)
-      
-      if (eligibleServices.length > 0) {
-        onSelectionChange(eligibleServices)
-      }
-    }
-  }, [allServices, userTier, maxSelectableProp]) // Only run when services load, not on every selection change
+  // NOTE: Removed auto-select logic - user should manually select complementary services
+  // Previously this useEffect would auto-select eligible services when loaded
 
   // Helper function to format target audience display with icons
   const formatTargetAudience = (service: ExtendedComplementaryService): JSX.Element | null => {
@@ -290,7 +277,6 @@ const ComplementaryServices = ({
     const renderLevelBadges = (levels: string[]) => {
       return levels.map(lvl => (
         <span key={lvl} className="comp-level-badge" data-level={lvl}>
-          <span className="comp-level-icon">{levelIcons[lvl]}</span>
           <span className="comp-level-name">{levelNames[lvl]}</span>
         </span>
       ))
@@ -436,9 +422,9 @@ const ComplementaryServices = ({
                     {service.requiredUserType && !service.requiredLevel ? (
                       <span>Dành cho {service.requiredUserType}</span>
                     ) : service.requiredUserType && service.requiredLevel ? (
-                      <span>Dành cho {service.requiredUserType} cấp {levelIcons[service.requiredLevel]} {levelNames[service.requiredLevel] || service.requiredLevel} trở lên</span>
+                      <span>Dành cho {service.requiredUserType} cấp {levelNames[service.requiredLevel] || service.requiredLevel} trở lên</span>
                     ) : service.requiredLevel ? (
-                      <span>Yêu cầu cấp {levelIcons[service.requiredLevel]} {levelNames[service.requiredLevel] || service.requiredLevel} trở lên</span>
+                      <span>Yêu cầu cấp {levelNames[service.requiredLevel] || service.requiredLevel} trở lên</span>
                     ) : (
                       <span>Không khả dụng</span>
                     )}

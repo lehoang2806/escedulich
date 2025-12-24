@@ -43,11 +43,11 @@ const PolicyPage = () => {
     {
       id: 2,
       icon: 'CreditCard',
-      title: 'Chính sách đặt tour & thanh toán',
+      title: 'Chính sách đặt Tour & thanh toán',
       items: [
-        'Xác nhận tour qua website, fanpage hoặc hotline.',
-        'Thanh toán qua chuyển khoản hoặc tại văn phòng.',
-        'Hủy tour trước 7 ngày được hoàn 100%; hủy trong vòng 1–3 ngày sẽ có phí tuỳ theo quy định từng tour.',
+        'Khách du lịch sẽ thanh toán trước 10% tiền đặt cọc và sẽ hoàn thành thanh toán số tiền còn lại cho host khi bắt đầu tham gia tour.',
+        'Nếu hủy tour sẽ không được hoàn lại tiền cọc nên hãy chú ý trước khi thanh toán.',
+        'Nếu khách du lịch không đến nơi đúng thời gian đặt và chủ gói dịch vụ không liên lạc được cho khách du lịch, chủ gói dịch vụ có thể tiến hành hủy tour sau 8 tiếng kể từ thời gian bắt đầu tour.',
       ],
     },
     {
@@ -78,6 +78,7 @@ const PolicyPage = () => {
         'Không sao chép nội dung nếu chưa được phép.',
         'Không sử dụng website cho các mục đích trái pháp luật.',
         'Chúng tôi có quyền cập nhật chính sách khi cần thiết.',
+        'Chỉ đăng những thông tin liên quan tới dịch vụ sinh thái, nếu nội dung không phù hợp chúng tôi có thể từ chối hiển thị nội dung của bạn.',
       ],
     },
   ]

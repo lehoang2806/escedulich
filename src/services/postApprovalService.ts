@@ -1,7 +1,6 @@
 /**
- * Service để lưu và đọc thời gian phê duyệt bài viết từ Firestore
- * Giải quyết vấn đề localStorage chỉ tồn tại trên browser của Admin
- * Bằng cách lưu vào Firestore, cả Admin và User đều có thể truy cập
+ * postApprovalService.ts
+ * Service để lưu trữ và lấy thời gian phê duyệt bài viết từ Firestore
  */
 
 import { db } from '~/firebase'
@@ -11,94 +10,88 @@ const COLLECTION_NAME = 'post_approval_times'
 
 /**
  * Lưu thời gian phê duyệt bài viết vào Firestore
- * Được gọi khi Admin approve bài viết
+ * @param postId - ID của bài viết
+ * @param approvalTime - Thời gian phê duyệt (mặc định là thời gian hiện tại)
  */
-export const saveApprovalTimeToFirestore = async (postId: number | string): Promise<void> => {
+export const saveApprovalTimeToFirestore = async (
+  postId: number | string,
+  approvalTime?: string
+): Promise<void> => {
   try {
     const docRef = doc(db, COLLECTION_NAME, String(postId))
     await setDoc(docRef, {
       postId: String(postId),
-      approvedAt: new Date().toISOString(),
+      approvalTime: approvalTime || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     })
-    console.log(`[PostApprovalService] Saved approval time for post ${postId}`)
+    console.log(`[postApprovalService] Saved approval time for post ${postId}`)
   } catch (error) {
-    console.error('[PostApprovalService] Error saving approval time:', error)
-    // Fallback to localStorage if Firestore fails
-    try {
-      const approvedTimes = JSON.parse(localStorage.getItem('post_approved_times') || '{}')
-      approvedTimes[String(postId)] = new Date().toISOString()
-      localStorage.setItem('post_approved_times', JSON.stringify(approvedTimes))
-    } catch (e) {
-      console.error('[PostApprovalService] Fallback localStorage also failed:', e)
-    }
+    console.error('[postApprovalService] Error saving approval time to Firestore:', error)
+    throw error
   }
 }
 
 /**
  * Lấy thời gian phê duyệt của một bài viết từ Firestore
+ * @param postId - ID của bài viết
+ * @returns Thời gian phê duyệt hoặc null nếu không tìm thấy
  */
-export const getApprovalTimeFromFirestore = async (postId: number | string): Promise<string | null> => {
+export const getApprovalTimeFromFirestore = async (
+  postId: number | string
+): Promise<string | null> => {
   try {
     const docRef = doc(db, COLLECTION_NAME, String(postId))
     const docSnap = await getDoc(docRef)
     
     if (docSnap.exists()) {
-      return docSnap.data().approvedAt || null
+      return docSnap.data().approvalTime || null
     }
     return null
   } catch (error) {
-    console.error('[PostApprovalService] Error getting approval time:', error)
-    // Fallback to localStorage
-    try {
-      const approvedTimes = JSON.parse(localStorage.getItem('post_approved_times') || '{}')
-      return approvedTimes[String(postId)] || null
-    } catch (e) {
-      return null
-    }
+    console.error('[postApprovalService] Error getting approval time from Firestore:', error)
+    return null
   }
 }
 
 /**
  * Lấy tất cả thời gian phê duyệt từ Firestore
- * Dùng để cache và tránh gọi nhiều lần
+ * @returns Object với key là postId và value là approvalTime
  */
 export const getAllApprovalTimesFromFirestore = async (): Promise<Record<string, string>> => {
   try {
     const collectionRef = collection(db, COLLECTION_NAME)
     const querySnapshot = await getDocs(collectionRef)
     
-    const approvalTimes: Record<string, string> = {}
+    const times: Record<string, string> = {}
     querySnapshot.forEach((doc) => {
       const data = doc.data()
-      if (data.postId && data.approvedAt) {
-        approvalTimes[data.postId] = data.approvedAt
+      if (data.postId && data.approvalTime) {
+        times[String(data.postId)] = data.approvalTime
       }
     })
     
-    // Cache to localStorage for faster subsequent access
-    localStorage.setItem('post_approved_times', JSON.stringify(approvalTimes))
-    
-    return approvalTimes
+    console.log(`[postApprovalService] Loaded ${Object.keys(times).length} approval times from Firestore`)
+    return times
   } catch (error) {
-    console.error('[PostApprovalService] Error getting all approval times:', error)
-    // Fallback to localStorage
-    try {
-      return JSON.parse(localStorage.getItem('post_approved_times') || '{}')
-    } catch (e) {
-      return {}
-    }
+    console.error('[postApprovalService] Error getting all approval times from Firestore:', error)
+    return {}
   }
 }
 
 /**
- * Lấy thời gian phê duyệt từ cache (localStorage) hoặc Firestore
- * Ưu tiên cache để tăng tốc độ
+ * Lấy thời gian phê duyệt bài viết
+ * Ưu tiên từ cached Firestore data, fallback to localStorage
+ * @param postId - ID của bài viết
+ * @param cachedTimes - Cache của approval times từ Firestore (optional)
+ * @returns Thời gian phê duyệt hoặc null
  */
-export const getApprovalTime = (postId: number | string, cachedTimes?: Record<string, string>): string | null => {
+export const getApprovalTime = (
+  postId: number | string,
+  cachedTimes?: Record<string, string>
+): string | null => {
   const postIdStr = String(postId)
   
-  // Nếu có cached times từ Firestore, dùng nó
+  // Ưu tiên từ cached Firestore data
   if (cachedTimes && cachedTimes[postIdStr]) {
     return cachedTimes[postIdStr]
   }
@@ -108,6 +101,7 @@ export const getApprovalTime = (postId: number | string, cachedTimes?: Record<st
     const approvedTimes = JSON.parse(localStorage.getItem('post_approved_times') || '{}')
     return approvedTimes[postIdStr] || null
   } catch (e) {
+    console.error('[postApprovalService] Error reading from localStorage:', e)
     return null
   }
 }

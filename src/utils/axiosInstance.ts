@@ -1,10 +1,26 @@
 import axios from 'axios'
-import { API_BASE_URL } from '~/config/api'
+import { API_BASE_URL, API_ENDPOINTS } from '~/config/api'
+import { showBannedModal } from './bannedModal'
 
 // Log API_BASE_URL để debug (chỉ log một lần)
 if (import.meta.env.DEV && !(window as any).__AXIOS_INSTANCE_LOGGED) {
   console.log('🔧 [axiosInstance] API_BASE_URL:', API_BASE_URL)
   ;(window as any).__AXIOS_INSTANCE_LOGGED = true
+}
+
+// Flag để tránh kiểm tra account status nhiều lần
+let isCheckingBannedStatus = false
+
+// Hàm đăng xuất user bị khóa
+const logoutBannedUser = () => {
+  localStorage.removeItem('token')
+  localStorage.removeItem('userInfo')
+  sessionStorage.removeItem('token')
+  sessionStorage.removeItem('userInfo')
+  // Hiển thị modal thông báo đẹp thay vì alert
+  showBannedModal(() => {
+    window.location.href = '/login'
+  })
 }
 
 // Tạo axios instance với base URL
@@ -67,6 +83,38 @@ realAxiosInstance.interceptors.response.use(
         data: response.data,
       })
     }
+    
+    // Kiểm tra nếu response chứa thông tin user và user bị khóa
+    // Điều này xảy ra khi gọi API lấy thông tin user hiện tại
+    const url = response.config.url || ''
+    if (url.includes(API_ENDPOINTS.USER) && response.data) {
+      const userData = response.data
+      // Kiểm tra nếu đây là thông tin của user hiện tại và bị khóa
+      // Chỉ kiểm tra IS_BANNED, không kiểm tra IsActive vì tài khoản mới có thể có IsActive = false
+      if (userData.IS_BANNED === true) {
+        // Lấy userId từ localStorage để so sánh
+        try {
+          const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+          if (userInfoStr) {
+            const currentUser = JSON.parse(userInfoStr)
+            const currentUserId = currentUser.Id || currentUser.id
+            const responseUserId = userData.Id || userData.id
+            // Chỉ logout nếu đây là thông tin của user hiện tại
+            if (currentUserId && responseUserId && currentUserId === responseUserId) {
+              if (!isCheckingBannedStatus) {
+                isCheckingBannedStatus = true
+                setTimeout(() => {
+                  logoutBannedUser()
+                }, 100)
+              }
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+    
     return response
   },
   (error: any) => {
@@ -118,9 +166,31 @@ realAxiosInstance.interceptors.response.use(
       if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
         // Chỉ redirect nếu không phải trang public
         const publicPaths = ['/', '/services', '/services/', '/about', '/forum']
-        if (!publicPaths.includes(window.location.pathname)) {
+        const isPublicPath = publicPaths.includes(window.location.pathname) || 
+          window.location.pathname.startsWith('/services/') // Chi tiết dịch vụ cũng là public
+        if (!isPublicPath) {
           window.location.href = '/login'
         }
+      }
+    }
+    
+    // Kiểm tra nếu lỗi 403 với message về account bị khóa
+    if (error.response?.status === 403) {
+      const errorMessage = error.response?.data?.message || error.response?.data?.Message || ''
+      const errorTitle = error.response?.data?.title || error.response?.data?.Title || ''
+      const combinedMessage = `${errorMessage} ${errorTitle}`.toLowerCase()
+      
+      // Kiểm tra các từ khóa liên quan đến account bị khóa
+      if (combinedMessage.includes('banned') || 
+          combinedMessage.includes('locked') || 
+          combinedMessage.includes('disabled') ||
+          combinedMessage.includes('bị khóa') ||
+          combinedMessage.includes('bị cấm')) {
+        if (!isCheckingBannedStatus) {
+          isCheckingBannedStatus = true
+          logoutBannedUser()
+        }
+        return Promise.reject(error)
       }
     }
     // 403 Forbidden - không logout, chỉ log lỗi (user có thể không có quyền cho action cụ thể)

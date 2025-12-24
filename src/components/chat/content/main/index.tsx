@@ -154,13 +154,14 @@ const formatTimestamp = (value?: string): string => {
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days} ngày trước`
 
-  // Nếu > 7 ngày, hiển thị ngày tháng đầy đủ
+  // Nếu > 7 ngày, hiển thị ngày tháng đầy đủ theo timezone Việt Nam
   return new Date(messageTime).toLocaleString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZone: 'Asia/Ho_Chi_Minh'
   })
 }
 
@@ -1763,6 +1764,7 @@ export default function ChatMainContent() {
                       borderRadius: '1.2rem',
                       bgcolor: 'rgba(255, 255, 255, 0.8)',
                       fontSize: '1.4rem',
+                      height: 44,
                       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
                       transition: 'all 0.3s ease',
                       '& fieldset': {
@@ -1787,32 +1789,35 @@ export default function ChatMainContent() {
                     }
                   }}
                 />
-                <Button
-                  variant="contained"
-                  startIcon={<AddCommentIcon />}
-                  onClick={handleOpenCreateChatDialog}
-                  disabled={isLoadingChatUsers}
-                  sx={{
-                    minWidth: { xs: '100%', md: '18rem' },
-                    borderRadius: '1.2rem',
-                    fontSize: '1.4rem',
-                    fontWeight: 600,
-                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.25)',
-                    textTransform: 'none',
-                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                    '&:hover': {
-                      background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                      boxShadow: '0 6px 16px rgba(25, 118, 210, 0.35)'
-                    },
-                    '&.Mui-disabled': {
-                      background: 'linear-gradient(135deg, #e0e0e0 0%, #bdbdbd 100%)',
-                      boxShadow: 'none',
-                      color: 'rgba(0,0,0,0.4)'
-                    }
-                  }}
-                >
-                  {isLoadingChatUsers ? 'Đang tải...' : 'Tạo đoạn chat'}
-                </Button>
+                <Tooltip title="Tạo đoạn chat mới" arrow>
+                  <IconButton
+                    onClick={handleOpenCreateChatDialog}
+                    disabled={isLoadingChatUsers}
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '1.2rem',
+                      boxShadow: '0 4px 12px rgba(25, 118, 210, 0.25)',
+                      background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                      color: 'white',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
+                        boxShadow: '0 6px 16px rgba(25, 118, 210, 0.35)'
+                      },
+                      '&.Mui-disabled': {
+                        background: 'linear-gradient(135deg, #e0e0e0 0%, #bdbdbd 100%)',
+                        boxShadow: 'none',
+                        color: 'rgba(0,0,0,0.4)'
+                      }
+                    }}
+                  >
+                    {isLoadingChatUsers ? (
+                      <CircularProgress size={20} color="inherit" />
+                    ) : (
+                      <AddCommentIcon />
+                    )}
+                  </IconButton>
+                </Tooltip>
               </Box>
             </Box>
 
@@ -2183,7 +2188,6 @@ export default function ChatMainContent() {
                             isLastInGroup={displayInfo.isLastInGroup}
                             currentUserAvatar={currentUser.avatar}
                             participantAvatar={selectedConversation.participantAvatar}
-                            onReactionClick={(e, msgId) => handleReactionClick(msgId, e)}
                           />
 
                           {/* Reactions Display */}
@@ -2376,40 +2380,16 @@ export default function ChatMainContent() {
                   )}
 
                   <Box className="flex items-center gap-[1.2rem]!">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      ref={fileInputRef}
-                      onChange={handleImageUpload}
-                      style={{ display: 'none' }}
-                    />
-                    <Tooltip title="Chọn ảnh" arrow>
-                      <IconButton
-                        onClick={() => fileInputRef.current?.click()}
-                        sx={{
-                          color: 'primary.main',
-                          width: 44,
-                          height: 44,
-                          transition: 'all 0.2s ease',
-                          '&:hover': {
-                            bgcolor: 'rgba(25, 118, 210, 0.1)',
-                            transform: 'scale(1.1)'
-                          }
-                        }}
-                      >
-                        <ImageIcon />
-                      </IconButton>
-                    </Tooltip>
                     <Tooltip title="Chọn emoji" arrow>
                       <IconButton
                         onClick={handleEmojiClick}
                         sx={{
-                          color: 'primary.main',
+                          color: '#0f766e',
                           width: 44,
                           height: 44,
                           transition: 'all 0.2s ease',
                           '&:hover': {
-                            bgcolor: 'rgba(25, 118, 210, 0.1)',
+                            bgcolor: 'rgba(15, 118, 110, 0.1)',
                             transform: 'scale(1.1)'
                           }
                         }}
@@ -2507,15 +2487,11 @@ export default function ChatMainContent() {
                     PaperProps={{
                       sx: {
                         p: 2,
-                        borderRadius: '1.6rem',
+                        borderRadius: '1.2rem',
                         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
-                        background:
-                          'linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 249, 255, 0.98) 100%)',
-                        backdropFilter: 'blur(10px)',
+                        bgcolor: '#fff',
                         border: '1px solid rgba(0, 0, 0, 0.08)',
-                        maxWidth: '400px',
-                        maxHeight: '400px',
-                        overflow: 'auto'
+                        maxWidth: '320px'
                       }
                     }}
                   >
@@ -2523,28 +2499,24 @@ export default function ChatMainContent() {
                       sx={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(8, 1fr)',
-                        gap: 1,
-                        width: '100%'
+                        gap: 0.5
                       }}
                     >
                       {emojiPickerEmojis.map((emoji, index) => (
-                        <Tooltip key={index} title={emoji} arrow>
-                          <IconButton
-                            onClick={() => handleEmojiSelect(emoji)}
-                            sx={{
-                              width: 40,
-                              height: 40,
-                              fontSize: '2rem',
-                              transition: 'all 0.2s ease',
-                              '&:hover': {
-                                bgcolor: 'rgba(25, 118, 210, 0.1)',
-                                transform: 'scale(1.2)'
-                              }
-                            }}
-                          >
-                            {emoji}
-                          </IconButton>
-                        </Tooltip>
+                        <IconButton
+                          key={index}
+                          onClick={() => handleEmojiSelect(emoji)}
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            fontSize: '1.6rem',
+                            '&:hover': {
+                              bgcolor: 'rgba(15, 118, 110, 0.1)'
+                            }
+                          }}
+                        >
+                          {emoji}
+                        </IconButton>
                       ))}
                     </Box>
                   </Popover>
@@ -2620,10 +2592,53 @@ export default function ChatMainContent() {
         </Box>
       </Box>
 
-      <Dialog open={isCreateChatOpen} onClose={handleCloseCreateChatDialog} fullWidth maxWidth="sm">
-        <DialogTitle className="text-[2rem]! font-semibold!">Tạo đoạn chat mới</DialogTitle>
-        <DialogContent dividers>
-          <Typography className="text-[1.4rem]!" sx={{ color: 'text.secondary', mb: 2 }}>
+      <Dialog 
+        open={isCreateChatOpen} 
+        onClose={handleCloseCreateChatDialog} 
+        fullWidth 
+        maxWidth="sm"
+        PaperProps={{
+          sx: {
+            borderRadius: '1.6rem',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.2)',
+            overflow: 'hidden'
+          }
+        }}
+      >
+        <Box
+          sx={{
+            background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+            p: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2
+          }}
+        >
+          <Box
+            sx={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              bgcolor: 'rgba(255, 255, 255, 0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <AddCommentIcon sx={{ fontSize: '2.4rem', color: 'white' }} />
+          </Box>
+          <Typography
+            sx={{
+              fontSize: '2rem',
+              fontWeight: 700,
+              color: 'white'
+            }}
+          >
+            Tạo đoạn chat mới
+          </Typography>
+        </Box>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography sx={{ fontSize: '1.4rem', color: 'text.secondary', mb: 3 }}>
             Chọn người dùng trong hệ thống để bắt đầu trò chuyện riêng tư.
           </Typography>
           <Autocomplete
@@ -2646,15 +2661,21 @@ export default function ChatMainContent() {
                   sx={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1,
-                    justifyContent: 'space-between'
+                    gap: 1.5,
+                    justifyContent: 'space-between',
+                    py: 1.5,
+                    px: 2,
+                    borderRadius: '0.8rem',
+                    '&:hover': {
+                      bgcolor: 'rgba(25, 118, 210, 0.08)'
+                    }
                   }}
                 >
                   <Box sx={{ flex: 1 }}>
-                    <Typography className="text-[1.4rem]! font-semibold!">
+                    <Typography sx={{ fontSize: '1.4rem', fontWeight: 600, color: '#1e293b' }}>
                       {option.fullName}
                     </Typography>
-                    <Typography className="text-[1.2rem]!" sx={{ color: 'text.secondary' }}>
+                    <Typography sx={{ fontSize: '1.2rem', color: 'text.secondary' }}>
                       {option.email}
                     </Typography>
                   </Box>
@@ -2662,7 +2683,12 @@ export default function ChatMainContent() {
                     <Chip
                       label="Đã có đoạn chat"
                       size="small"
-                      sx={{ fontSize: '1rem', fontWeight: 600 }}
+                      sx={{ 
+                        fontSize: '1rem', 
+                        fontWeight: 600,
+                        bgcolor: 'rgba(25, 118, 210, 0.1)',
+                        color: '#1976d2'
+                      }}
                     />
                   )}
                 </Box>
@@ -2672,8 +2698,22 @@ export default function ChatMainContent() {
               <TextField
                 {...params}
                 label="Người dùng"
-                placeholder="Nhập tên hoặc email"
-                margin="normal"
+                placeholder="Nhập tên hoặc email để tìm kiếm..."
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: '1rem',
+                    fontSize: '1.4rem',
+                    '&:hover fieldset': {
+                      borderColor: '#1976d2'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#1976d2'
+                    }
+                  },
+                  '& .MuiInputLabel-root': {
+                    fontSize: '1.4rem'
+                  }
+                }}
                 InputProps={{
                   ...params.InputProps,
                   endAdornment: (
@@ -2687,28 +2727,90 @@ export default function ChatMainContent() {
             )}
           />
           <TextField
+            fullWidth
             label="Tin nhắn đầu tiên"
-            placeholder="Nhập tin nhắn mở đầu"
-            margin="normal"
+            placeholder="Nhập tin nhắn mở đầu để bắt đầu cuộc trò chuyện..."
             multiline
-            minRows={2}
+            minRows={3}
             value={initialMessage}
             onChange={(e) => setInitialMessage(e.target.value)}
+            sx={{
+              mt: 3,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '1rem',
+                fontSize: '1.4rem',
+                '&:hover fieldset': {
+                  borderColor: '#1976d2'
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#1976d2'
+                }
+              },
+              '& .MuiInputLabel-root': {
+                fontSize: '1.4rem'
+              }
+            }}
           />
           {createChatError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
+            <Alert 
+              severity="error" 
+              sx={{ 
+                mt: 2, 
+                borderRadius: '0.8rem',
+                fontSize: '1.3rem'
+              }}
+            >
               {createChatError}
             </Alert>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2.5 }}>
-          <Button onClick={handleCloseCreateChatDialog}>Hủy</Button>
+        <DialogActions sx={{ p: 2.5, gap: 1, borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+          <Button 
+            onClick={handleCloseCreateChatDialog}
+            sx={{
+              borderRadius: '1rem',
+              px: 3,
+              py: 1,
+              fontSize: '1.3rem',
+              textTransform: 'none',
+              color: 'text.secondary',
+              '&:hover': {
+                bgcolor: 'rgba(0, 0, 0, 0.05)'
+              }
+            }}
+          >
+            Hủy
+          </Button>
           <Button
             variant="contained"
             onClick={handleCreateChatConversation}
             disabled={isLoadingChatUsers || !selectedChatUser || isCreatingChat}
+            sx={{
+              borderRadius: '1rem',
+              px: 3,
+              py: 1,
+              fontSize: '1.3rem',
+              textTransform: 'none',
+              background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+              boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
+                boxShadow: '0 6px 16px rgba(25, 118, 210, 0.4)'
+              },
+              '&.Mui-disabled': {
+                background: 'linear-gradient(135deg, #e0e0e0 0%, #bdbdbd 100%)',
+                boxShadow: 'none'
+              }
+            }}
           >
-            {isCreatingChat ? 'Đang tạo...' : 'Bắt đầu chat'}
+            {isCreatingChat ? (
+              <>
+                <CircularProgress size={18} color="inherit" sx={{ mr: 1 }} />
+                Đang tạo...
+              </>
+            ) : (
+              'Bắt đầu chat'
+            )}
           </Button>
         </DialogActions>
       </Dialog>
@@ -2837,7 +2939,24 @@ export default function ChatMainContent() {
         onClose={handleSnackbarClose}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
+        <Alert 
+          onClose={handleSnackbarClose} 
+          severity={snackbarSeverity} 
+          sx={{ 
+            width: '100%',
+            borderRadius: '1rem',
+            fontSize: '1.4rem',
+            fontWeight: 500,
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+            '& .MuiAlert-message': {
+              color: snackbarSeverity === 'success' ? '#166534' : '#991b1b'
+            },
+            bgcolor: snackbarSeverity === 'success' ? '#f0fdf4' : '#fef2f2',
+            '& .MuiAlert-icon': {
+              color: snackbarSeverity === 'success' ? '#22c55e' : '#ef4444'
+            }
+          }}
+        >
           {snackbarMessage}
         </Alert>
       </Snackbar>

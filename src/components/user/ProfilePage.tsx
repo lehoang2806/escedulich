@@ -108,7 +108,17 @@ const ProfilePage = () => {
   const [fieldErrors, setFieldErrors] = useState({});
   const [hasChanges, setHasChanges] = useState(false);
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState(location.state?.activeTab || 'personal');
+  
+  // Lấy tab từ URL query parameter hoặc location.state, mặc định là 'personal'
+  const getInitialTab = () => {
+    const searchParams = new URLSearchParams(location.search);
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl) return tabFromUrl;
+    if (location.state?.activeTab) return location.state.activeTab;
+    return 'personal';
+  };
+  
+  const [activeTab, setActiveTab] = useState(getInitialTab);
   const [bookings, setBookings] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
@@ -137,7 +147,10 @@ const ProfilePage = () => {
   
   // Revenue chart filters
   const [revenueYear, setRevenueYear] = useState(new Date().getFullYear());
-  const [revenueMonth, setRevenueMonth] = useState<number>(0); // 0 = all months, 1-12 = specific month
+  const [revenueMonth, setRevenueMonth] = useState<number>(new Date().getMonth() + 1); // Default to current month (1-12)
+  
+  // Payment info cache for bookings (bookingId -> payment)
+  const [bookingPayments, setBookingPayments] = useState<Record<number, any>>({});
   
   // Form state
   const [formData, setFormData] = useState<{ name: string; email: string; phone: string; dob: string; gender: string; address: string; avatar: string }>({
@@ -376,6 +389,25 @@ const ProfilePage = () => {
         if (response.data && Array.isArray(response.data)) {
           // Backend đã sắp xếp rồi, không cần sort lại ở frontend
           setBookings(response.data);
+          
+          // Load payment info for all bookings
+          const paymentsMap: Record<number, any> = {};
+          await Promise.all(
+            response.data.map(async (booking: any) => {
+              const bId = booking.Id || booking.id;
+              if (bId) {
+                try {
+                  const paymentRes = await axiosInstance.get(`${API_ENDPOINTS.PAYMENT}/status/${bId}`);
+                  if (paymentRes.data) {
+                    paymentsMap[bId] = paymentRes.data;
+                  }
+                } catch {
+                  // No payment found, ignore
+                }
+              }
+            })
+          );
+          setBookingPayments(paymentsMap);
         } else {
           setBookings([]);
         }
@@ -409,42 +441,54 @@ const ProfilePage = () => {
   // Calculate monthly revenue data from real bookings
   const revenueChartData = useMemo(() => {
     const months = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
-    
+
     // Initialize monthly data
     const monthlyData: { [key: number]: number } = {};
+    const monthlyCouponDiscount: { [key: number]: number } = {};
     for (let i = 0; i < 12; i++) {
       monthlyData[i] = 0;
+      monthlyCouponDiscount[i] = 0;
     }
-    
+
     // Aggregate bookings by month for selected year
     bookings.forEach((booking: any) => {
       // Handle both camelCase and PascalCase property names
-      const bookingDate = new Date(booking.BookingDate || booking.bookingDate || booking.CreatedAt || booking.createdAt);
+      const bookingDate = new Date(
+        booking.BookingDate || booking.bookingDate || booking.CreatedAt || booking.createdAt
+      );
       const status = booking.Status || booking.status;
       const amount = booking.TotalAmount || booking.totalAmount || 0;
-      
+      const notes = booking.Notes || booking.notes || '';
+
       if (bookingDate.getFullYear() === revenueYear) {
         const month = bookingDate.getMonth();
-        // Include all paid/completed/confirmed bookings
+        // Only include paid/completed/confirmed bookings (exclude pending)
         const statusLower = (status || '').toLowerCase();
-        if (statusLower === 'completed' || statusLower === 'confirmed' || statusLower === 'paid' || statusLower === 'pending') {
+        if (statusLower === 'completed' || statusLower === 'confirmed' || statusLower === 'paid') {
           monthlyData[month] += amount;
+          
+          // Parse coupon discount from Notes
+          const couponMatch = notes.match(/\[COUPON_DISCOUNT:(\d+)\]/);
+          if (couponMatch) {
+            monthlyCouponDiscount[month] += parseInt(couponMatch[1], 10);
+          }
         }
       }
     });
-    
-    // Build cumulative chart data
-    let cumulative = 0;
+
+    // Build chart data - hiển thị doanh thu từng tháng (không tích lũy)
     return months.map((month, index) => {
-      cumulative += monthlyData[index];
-      const originalPrice = cumulative / 0.97;
-      const savings = originalPrice - cumulative;
+      const agencyPrice = monthlyData[index];
+      const originalPrice = agencyPrice / 0.97;
+      const agencySavings = originalPrice - agencyPrice; // Tiết kiệm từ giảm giá Agency 3%
+      const couponSavings = monthlyCouponDiscount[index]; // Tiết kiệm từ coupon
+      const totalSavings = agencySavings + couponSavings; // Tổng tiết kiệm
       return {
         name: month,
         monthIndex: index,
         'Giá gốc': Math.round(originalPrice),
-        'Giá Agency': Math.round(cumulative),
-        'Tiết kiệm': Math.round(savings),
+        'Giá Agency': Math.round(agencyPrice),
+        'Tiết kiệm': Math.round(totalSavings),
         monthlyAmount: monthlyData[index]
       };
     });
@@ -453,43 +497,56 @@ const ProfilePage = () => {
   // Calculate daily revenue data for specific month
   const dailyChartData = useMemo(() => {
     if (revenueMonth === 0) return [];
-    
+
     // Get number of days in selected month
     const daysInMonth = new Date(revenueYear, revenueMonth, 0).getDate();
-    
+
     // Initialize daily data
     const dailyData: { [key: number]: number } = {};
+    const dailyCouponDiscount: { [key: number]: number } = {};
     for (let i = 1; i <= daysInMonth; i++) {
       dailyData[i] = 0;
+      dailyCouponDiscount[i] = 0;
     }
-    
+
     // Aggregate bookings by day for selected month
     bookings.forEach((booking: any) => {
-      const bookingDate = new Date(booking.BookingDate || booking.bookingDate || booking.CreatedAt || booking.createdAt);
+      const bookingDate = new Date(
+        booking.BookingDate || booking.bookingDate || booking.CreatedAt || booking.createdAt
+      );
       const status = booking.Status || booking.status;
       const amount = booking.TotalAmount || booking.totalAmount || 0;
-      
+      const notes = booking.Notes || booking.notes || '';
+
       if (bookingDate.getFullYear() === revenueYear && bookingDate.getMonth() === revenueMonth - 1) {
         const day = bookingDate.getDate();
         const statusLower = (status || '').toLowerCase();
-        if (statusLower === 'completed' || statusLower === 'confirmed' || statusLower === 'paid' || statusLower === 'pending') {
+        // Only include paid/completed/confirmed bookings (exclude pending)
+        if (statusLower === 'completed' || statusLower === 'confirmed' || statusLower === 'paid') {
           dailyData[day] += amount;
+          
+          // Parse coupon discount from Notes
+          const couponMatch = notes.match(/\[COUPON_DISCOUNT:(\d+)\]/);
+          if (couponMatch) {
+            dailyCouponDiscount[day] += parseInt(couponMatch[1], 10);
+          }
         }
       }
     });
-    
-    // Build cumulative daily chart data
-    let cumulative = 0;
+
+    // Build chart data - hiển thị doanh thu từng ngày (không tích lũy)
     const result = [];
     for (let day = 1; day <= daysInMonth; day++) {
-      cumulative += dailyData[day];
-      const originalPrice = cumulative / 0.97;
-      const savings = originalPrice - cumulative;
+      const agencyPrice = dailyData[day];
+      const originalPrice = agencyPrice / 0.97;
+      const agencySavings = originalPrice - agencyPrice; // Tiết kiệm từ giảm giá Agency 3%
+      const couponSavings = dailyCouponDiscount[day]; // Tiết kiệm từ coupon
+      const totalSavings = agencySavings + couponSavings; // Tổng tiết kiệm
       result.push({
         name: day.toString(),
         'Giá gốc': Math.round(originalPrice),
-        'Giá Agency': Math.round(cumulative),
-        'Tiết kiệm': Math.round(savings),
+        'Giá Agency': Math.round(agencyPrice),
+        'Tiết kiệm': Math.round(totalSavings),
         dailyAmount: dailyData[day]
       });
     }
@@ -499,20 +556,24 @@ const ProfilePage = () => {
   // Calculate totals based on month filter
   const filteredTotals = useMemo(() => {
     if (revenueMonth === 0) {
-      // All months - use cumulative totals
-      const lastMonth = revenueChartData[revenueChartData.length - 1];
+      // All months - sum all monthly data
+      const totalAgencyPrice = revenueChartData.reduce((sum, item) => sum + (item['Giá Agency'] || 0), 0);
+      const totalOriginalPrice = revenueChartData.reduce((sum, item) => sum + (item['Giá gốc'] || 0), 0);
+      const totalSavings = revenueChartData.reduce((sum, item) => sum + (item['Tiết kiệm'] || 0), 0);
       return {
-        agencyPrice: lastMonth?.['Giá Agency'] || 0,
-        originalPrice: lastMonth?.['Giá gốc'] || 0,
-        savings: lastMonth?.['Tiết kiệm'] || 0
+        agencyPrice: totalAgencyPrice,
+        originalPrice: totalOriginalPrice,
+        savings: totalSavings
       };
     } else {
-      // Specific month - use daily data totals
-      const lastDay = dailyChartData[dailyChartData.length - 1];
+      // Specific month - sum all daily data
+      const totalAgencyPrice = dailyChartData.reduce((sum, item) => sum + (item['Giá Agency'] || 0), 0);
+      const totalOriginalPrice = dailyChartData.reduce((sum, item) => sum + (item['Giá gốc'] || 0), 0);
+      const totalSavings = dailyChartData.reduce((sum, item) => sum + (item['Tiết kiệm'] || 0), 0);
       return {
-        agencyPrice: lastDay?.['Giá Agency'] || 0,
-        originalPrice: lastDay?.['Giá gốc'] || 0,
-        savings: lastDay?.['Tiết kiệm'] || 0
+        agencyPrice: totalAgencyPrice,
+        originalPrice: totalOriginalPrice,
+        savings: totalSavings
       };
     }
   }, [revenueChartData, dailyChartData, revenueMonth]);
@@ -529,11 +590,22 @@ const ProfilePage = () => {
   // Cập nhật activeTab khi location.state thay đổi (khi quay về từ PaymentPage)
   useEffect(() => {
     if (location.state?.activeTab) {
-      setActiveTab(location.state.activeTab);
-      // Clear state để tránh set lại khi re-render - sử dụng navigate thay vì window.history
-      navigate(location.pathname, { replace: true, state: {} });
+      const newTab = location.state.activeTab;
+      setActiveTab(newTab);
+      
+      // Cập nhật URL query parameter
+      const searchParams = new URLSearchParams(location.search);
+      if (newTab === 'personal') {
+        searchParams.delete('tab');
+      } else {
+        searchParams.set('tab', newTab);
+      }
+      const newSearch = searchParams.toString();
+      
+      // Clear state và cập nhật URL
+      navigate(`${location.pathname}${newSearch ? `?${newSearch}` : ''}`, { replace: true, state: {} });
     }
-  }, [location.state, location.pathname, navigate]);
+  }, [location.state, location.pathname, location.search, navigate]);
 
   // Fetch reviews when tab is profile-active
   useEffect(() => {
@@ -1552,9 +1624,19 @@ const ProfilePage = () => {
     setIsEditing(false);
     setError(null);
     setSuccess(null);
+    
+    // Cập nhật URL query parameter để giữ tab khi refresh
+    const searchParams = new URLSearchParams(location.search);
+    if (tab === 'personal') {
+      searchParams.delete('tab'); // Không cần query param cho tab mặc định
+    } else {
+      searchParams.set('tab', tab);
+    }
+    const newSearch = searchParams.toString();
+    navigate(`${location.pathname}${newSearch ? `?${newSearch}` : ''}`, { replace: true });
   };
 
-  // Get booking status display
+  // Get booking status display (Tourist/Agency view)
   const getBookingStatusDisplay = (status) => {
     const statusLower = (status || '').toLowerCase();
     switch (statusLower) {
@@ -1688,59 +1770,27 @@ const ProfilePage = () => {
     if (!cancellingBooking) return;
     
     const bookingId = cancellingBooking.Id || cancellingBooking.id;
-    const serviceCombo = cancellingBooking.ServiceCombo || cancellingBooking.serviceCombo;
-    const serviceName = serviceCombo?.Name || serviceCombo?.name || 'Dịch vụ';
-    const serviceComboId = cancellingBooking.ServiceComboId || cancellingBooking.serviceComboId || serviceCombo?.Id || serviceCombo?.id;
-    const bookingNumber = cancellingBooking.BookingNumber || cancellingBooking.bookingNumber || bookingId;
     
     try {
       setCancellingInProgress(true);
       
-      // 1. Lấy HostId từ ServiceCombo trước
-      let hostId = serviceCombo?.HostId || serviceCombo?.hostId;
-      
-      // Nếu không có hostId trong serviceCombo, fetch từ API
-      if (!hostId && serviceComboId) {
-        try {
-          const comboResponse = await axiosInstance.get(`${API_ENDPOINTS.SERVICE_COMBO}/${serviceComboId}`);
-          hostId = comboResponse.data?.HostId || comboResponse.data?.hostId;
-        } catch (fetchErr) {
-          console.warn('Không thể lấy thông tin ServiceCombo:', fetchErr);
+      // Cập nhật status booking thành cancelled
+      await axiosInstance.put(
+        `${API_ENDPOINTS.BOOKING}/${bookingId}/status`, 
+        'cancelled',
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
-      }
+      );
       
-      // 2. Cập nhật status booking thành cancelled
-      await axiosInstance.put(`${API_ENDPOINTS.BOOKING}/${bookingId}/status`, JSON.stringify('cancelled'), {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      // 3. Gửi thông báo cho host về việc booking bị hủy
-      if (hostId) {
-        try {
-          const userName = userInfo?.Name || userInfo?.name || 'Khách hàng';
-          await axiosInstance.post(`${API_ENDPOINTS.NOTIFICATION}`, {
-            UserId: hostId,
-            Title: 'Booking đã bị hủy',
-            Message: `Khách hàng ${userName} đã hủy đặt dịch vụ "${serviceName}" (Mã booking: ${bookingNumber})`,
-            Type: 'booking_cancelled',
-            IsRead: false
-          });
-          console.log('✅ Đã gửi thông báo hủy booking cho host:', hostId);
-        } catch (notifErr) {
-          console.warn('Không thể gửi thông báo cho host:', notifErr);
-        }
-      } else {
-        console.warn('Không tìm thấy HostId để gửi thông báo');
-      }
-      
-      // 4. Reload bookings
+      // Reload bookings
       const userId = getUserId();
       const response = await axiosInstance.get(`${API_ENDPOINTS.BOOKING}/user/${userId}`);
       setBookings(response.data || []);
       
-      // 5. Đóng modal và hiển thị thông báo thành công
+      // Đóng modal và hiển thị thông báo thành công
       setShowCancelModal(false);
       setCancellingBooking(null);
       setSuccess('Hủy đặt dịch vụ thành công!');
@@ -2167,6 +2217,14 @@ const ProfilePage = () => {
                       }
                       const serviceImage = getImageUrl(imagePath, bookingFallbackImage);
                       
+                      // Ưu tiên lấy FINAL_AMOUNT từ Notes (số tiền thực tế sau coupon + Agency)
+                      // Nếu không có thì dùng TotalAmount (giá sau Agency, chưa giảm coupon)
+                      const notes = booking.Notes || booking.notes || '';
+                      const finalAmountMatch = notes.match(/\[FINAL_AMOUNT:(\d+)\]/);
+                      const displayAmount = finalAmountMatch 
+                        ? parseInt(finalAmountMatch[1], 10) 
+                        : (booking.TotalAmount || booking.totalAmount || 0);
+                      
                       return (
                         <div key={bookingId} className="profile-booking-card ui-card">
                           <div className="ui-card-content">
@@ -2197,10 +2255,10 @@ const ProfilePage = () => {
                                         <span>Số người: {booking.Quantity || booking.quantity}</span>
                                       </div>
                                     )}
-                                    {booking.TotalAmount && (
+                                    {displayAmount > 0 && (
                                       <div className="profile-booking-detail-item">
                                         <span className="profile-booking-price">
-                                          Tổng tiền: {formatPrice(booking.TotalAmount || booking.totalAmount)}
+                                          Tổng tiền: {formatPrice(displayAmount)}
                                         </span>
                                       </div>
                                     )}
@@ -2754,8 +2812,8 @@ const ProfilePage = () => {
                 <div className="profile-revenue-section">
                   <div className="profile-revenue-summary">
                     <div className="profile-revenue-card">
-                      <h4>Doanh thu của bạn</h4>
-                      <p className="profile-revenue-amount">{formatPrice(filteredTotals.savings)}</p>
+                      <h4>Tiết kiệm được</h4>
+                      <p className="profile-revenue-amount savings">{formatPrice(filteredTotals.savings)}</p>
                       <span className="profile-revenue-note">{revenueMonth === 0 ? `Năm ${revenueYear}` : `Tháng ${revenueMonth}/${revenueYear}`}</span>
                     </div>
                     <div className="profile-revenue-card">
@@ -2765,7 +2823,7 @@ const ProfilePage = () => {
                     </div>
                     <div className="profile-revenue-card">
                       <h4>Giá gốc</h4>
-                      <p className="profile-revenue-amount">{formatPrice(filteredTotals.originalPrice)}</p>
+                      <p className="profile-revenue-amount original">{formatPrice(filteredTotals.originalPrice)}</p>
                       <span className="profile-revenue-note">Giá trước khi giảm</span>
                     </div>
                   </div>
@@ -2883,9 +2941,13 @@ const ProfilePage = () => {
 
       {/* Cancel Booking Confirmation Modal */}
       {showCancelModal && cancellingBooking && (
-        <div className="profile-modal-overlay" onClick={() => !cancellingInProgress && setShowCancelModal(false)}>
+        <div className="profile-modal-overlay" onClick={() => {
+          if (!cancellingInProgress) {
+            setShowCancelModal(false);
+          }
+        }}>
           <div className="profile-modal-content" onClick={(e) => e.stopPropagation()} style={{
-            maxWidth: '450px',
+            maxWidth: '500px',
             padding: '24px',
             borderRadius: '12px',
             backgroundColor: '#fff',
@@ -2934,7 +2996,9 @@ const ProfilePage = () => {
                   <strong>Mã booking:</strong> {cancellingBooking.BookingNumber || cancellingBooking.bookingNumber || cancellingBooking.Id || cancellingBooking.id}
                 </p>
                 <p style={{ fontSize: '14px', color: '#374151', margin: 0 }}>
-                  <strong>Tổng tiền:</strong> {formatPrice(cancellingBooking.TotalAmount || cancellingBooking.totalAmount || 0)}
+                  <strong>Tổng tiền:</strong> {formatPrice(
+                    cancellingBooking.TotalAmount || cancellingBooking.totalAmount || 0
+                  )}
                 </p>
               </div>
             </div>

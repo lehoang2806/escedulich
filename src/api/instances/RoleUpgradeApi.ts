@@ -16,6 +16,7 @@ export type AgencyCertificate = {
   updatedAt?: string
   userName?: string
   userEmail?: string
+  userAvatar?: string | null
 }
 
 export type HostCertificate = {
@@ -31,6 +32,7 @@ export type HostCertificate = {
   updatedAt?: string
   hostName?: string
   hostEmail?: string
+  hostAvatar?: string | null
 }
 
 export type CertificateType = 'Agency' | 'Host'
@@ -162,7 +164,8 @@ const normalizeAgencyCertificate = (payload: any): AgencyCertificate => {
       createdAt: payload?.createdAt ?? payload?.CreatedAt ?? null,
       updatedAt: payload?.updatedAt ?? payload?.UpdatedAt ?? null,
       userName: payload?.userName ?? payload?.UserName ?? '',
-      userEmail: payload?.userEmail ?? payload?.UserEmail ?? ''
+      userEmail: payload?.userEmail ?? payload?.UserEmail ?? '',
+      userAvatar: payload?.userAvatar ?? payload?.UserAvatar ?? null
     }
   } catch (error) {
     console.warn('[RoleUpgradeApi] Failed to normalize AgencyCertificate:', payload, error)
@@ -184,7 +187,8 @@ const normalizeHostCertificate = (payload: any): HostCertificate => {
       createdAt: payload?.createdAt ?? payload?.CreatedAt ?? null,
       updatedAt: payload?.updatedAt ?? payload?.UpdatedAt ?? null,
       hostName: payload?.hostName ?? payload?.HostName ?? '',
-      hostEmail: payload?.hostEmail ?? payload?.HostEmail ?? ''
+      hostEmail: payload?.hostEmail ?? payload?.HostEmail ?? '',
+      hostAvatar: payload?.hostAvatar ?? payload?.HostAvatar ?? null
     }
   } catch (error) {
     console.warn('[RoleUpgradeApi] Failed to normalize HostCertificate:', payload, error)

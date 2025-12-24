@@ -2,9 +2,9 @@ import { fetchWithFallback, extractErrorMessage, getAuthToken } from './httpClie
 
 export interface NewsDto {
   newsId: number
+  title?: string
   content: string
   images: string[]
-  socialMediaLink?: string
   createdDate?: string
   authorId: number
   authorName: string
@@ -15,14 +15,14 @@ export interface NewsDto {
 }
 
 export interface CreateNewsDto {
+  title: string
   content: string
-  socialMediaLink?: string
   images?: string[]
 }
 
 export interface UpdateNewsDto {
+  title?: string
   content?: string
-  socialMediaLink?: string
   images?: string[]
 }
 
@@ -62,7 +62,17 @@ const MOCK_NEWS: NewsDto[] = [
 const normalizeNews = (payload: any): NewsDto => {
   // Backend returns NewsDto with PascalCase: NewsId, Content, AuthorName, etc.
   const newsId = parseInt(String(payload?.newsId ?? payload?.NewsId ?? 0), 10) || 0
-  const content = String(payload?.content ?? payload?.Content ?? '').trim()
+  const rawContent = String(payload?.content ?? payload?.Content ?? '').trim()
+  
+  // Tách title từ content nếu có format [TITLE]...[/TITLE]
+  let title: string | undefined = undefined
+  let content: string = rawContent
+  
+  const titleMatch = rawContent.match(/^\[TITLE\](.*?)\[\/TITLE\]\n?(.*)$/s)
+  if (titleMatch) {
+    title = titleMatch[1].trim() || undefined
+    content = titleMatch[2].trim()
+  }
 
   // Handle images - can be array or string
   let images: string[] = []
@@ -195,9 +205,9 @@ const normalizeNews = (payload: any): NewsDto => {
 
   return {
     newsId,
+    title,
     content,
     images: validImages,
-    socialMediaLink: payload?.socialMediaLink ?? payload?.SocialMediaLink ?? undefined,
     createdDate,
     authorId,
     authorName,
@@ -361,9 +371,9 @@ export const createNews = async (dto: CreateNewsDto): Promise<NewsDto> => {
   if (USE_MOCK_NEWS) {
     const newItem: NewsDto = {
       newsId: MOCK_NEWS.length + 1,
+      title: dto.title,
       content: dto.content,
       images: dto.images || [],
-      socialMediaLink: dto.socialMediaLink,
       createdDate: new Date().toISOString(),
       authorId: 1,
       authorName: 'Admin (mock)',
@@ -377,6 +387,14 @@ export const createNews = async (dto: CreateNewsDto): Promise<NewsDto> => {
     return newItem
   }
   // Validate input
+  if (!dto.title || !dto.title.trim()) {
+    throw new Error('Tiêu đề tin tức không được để trống')
+  }
+
+  if (dto.title.trim().length > 200) {
+    throw new Error('Tiêu đề tin tức tối đa 200 ký tự')
+  }
+
   if (!dto.content || !dto.content.trim()) {
     throw new Error('Nội dung tin tức không được để trống')
   }
@@ -385,8 +403,8 @@ export const createNews = async (dto: CreateNewsDto): Promise<NewsDto> => {
     throw new Error('Nội dung tin tức tối đa 4000 ký tự')
   }
 
-  if (dto.socialMediaLink && dto.socialMediaLink.trim().length > 500) {
-    throw new Error('Link mạng xã hội tối đa 500 ký tự')
+  if (!dto.images || dto.images.length === 0) {
+    throw new Error('Vui lòng thêm ít nhất 1 hình ảnh cho tin tức')
   }
 
   try {
@@ -397,6 +415,7 @@ export const createNews = async (dto: CreateNewsDto): Promise<NewsDto> => {
 
     const endpoint = '/api/news'
     console.log('[NewsApi] Creating news:', {
+      titleLength: dto.title.trim().length,
       contentLength: dto.content.trim().length,
       imagesCount: dto.images?.length || 0
     })
@@ -408,8 +427,8 @@ export const createNews = async (dto: CreateNewsDto): Promise<NewsDto> => {
         Authorization: `Bearer ${token}`
       },
       body: JSON.stringify({
-        Content: dto.content.trim(),
-        SocialMediaLink: dto.socialMediaLink?.trim() || null,
+        // Backend không có field Title, gộp title vào đầu content với separator
+        Content: `[TITLE]${dto.title.trim()}[/TITLE]\n${dto.content.trim()}`,
         Images: dto.images || []
       })
     })

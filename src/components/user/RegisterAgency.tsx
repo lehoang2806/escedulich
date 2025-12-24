@@ -4,7 +4,7 @@ import Header from './Header'
 import Footer from './Footer'
 import Button from './ui/Button'
 import { Card, CardContent } from './ui/Card'
-import { requestAgencyUpgrade } from '~/api/user/instances/RoleUpgradeApi'
+import { requestAgencyUpgrade, checkAnyPendingUpgradeRequest } from '~/api/user/instances/RoleUpgradeApi'
 import { uploadImageToFirebase } from '~/services/firebaseStorage'
 import axiosInstance from '~/utils/axiosInstance'
 import { API_ENDPOINTS } from '~/config/api'
@@ -49,23 +49,47 @@ const RegisterAgency = () => {
   const [loading, setLoading] = useState(false)
   const [licensePreview, setLicensePreview] = useState<string | null>(null)
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+  const [pendingType, setPendingType] = useState<'Host' | 'Agency' | null>(null)
   const [isAlreadyUpgraded, setIsAlreadyUpgraded] = useState(false)
+  const [checkingStatus, setCheckingStatus] = useState(true)
 
-  // Kiểm tra role khi component mount
+  // Kiểm tra role và pending request khi component mount
   useEffect(() => {
-    const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
-    if (userInfoStr) {
+    const checkUserStatus = async () => {
+      const userInfoStr = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo')
+      if (!userInfoStr) {
+        setCheckingStatus(false)
+        return
+      }
+
       try {
         const userInfo = JSON.parse(userInfoStr)
         const roleId = userInfo.RoleId || userInfo.roleId
+        const userId = userInfo.Id || userInfo.id
+
         // RoleId 2 = Host, RoleId 3 = Agency
         if (roleId === 2 || roleId === 3) {
           setIsAlreadyUpgraded(true)
+          setCheckingStatus(false)
+          return
+        }
+
+        // Kiểm tra có đơn pending nào không (cả Host và Agency)
+        if (userId) {
+          const result = await checkAnyPendingUpgradeRequest(parseInt(userId))
+          if (result.hasPending) {
+            setPendingMessage('Bạn đã gửi đơn trước đó rồi, vui lòng đợi Admin xử lý!')
+            setPendingType(result.type || null)
+          }
         }
       } catch (e) {
-        console.error('Error parsing userInfo:', e)
+        console.error('Error checking user status:', e)
       }
+
+      setCheckingStatus(false)
     }
+
+    checkUserStatus()
   }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -278,8 +302,20 @@ const RegisterAgency = () => {
             </div>
           </div>
 
-          {/* Hiển thị thông báo nếu đã nâng cấp rồi */}
-          {isAlreadyUpgraded ? (
+          {/* Hiển thị loading khi đang kiểm tra */}
+          {checkingStatus ? (
+            <Card className="reg-agency-register-agency-form-card">
+              <CardContent>
+                <div className="reg-agency-pending-alert" style={{
+                  textAlign: 'center',
+                  padding: '3rem 2rem'
+                }}>
+                  <span className="reg-agency-spinner-small" style={{ width: '40px', height: '40px', marginBottom: '1rem', display: 'inline-block' }}></span>
+                  <p style={{ color: '#6b7280' }}>Đang kiểm tra trạng thái...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : isAlreadyUpgraded ? (
             <Card className="reg-agency-register-agency-form-card">
               <CardContent>
                 <div className="reg-agency-pending-alert" style={{
@@ -302,6 +338,37 @@ const RegisterAgency = () => {
                     onClick={() => navigate('/')}
                   >
                     Về trang chủ
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : pendingMessage ? (
+            <Card className="reg-agency-register-agency-form-card">
+              <CardContent>
+                <div className="reg-agency-pending-alert" style={{
+                  textAlign: 'center',
+                  padding: '3rem 2rem'
+                }}>
+                  <AlertCircleIcon style={{ width: '64px', height: '64px', color: '#f59e0b', marginBottom: '1rem' }} />
+                  <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.5rem' }}>
+                    Bạn đã gửi đơn trước đó rồi
+                  </h2>
+                  <p style={{ color: '#6b7280', marginBottom: '0.5rem' }}>
+                    Vui lòng đợi Admin xử lý!
+                  </p>
+                  <p style={{ color: '#9ca3af', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+                    {pendingType === 'Host' 
+                      ? 'Bạn đã có đơn đăng ký Host đang chờ xử lý. '
+                      : 'Bạn đã có đơn đăng ký Agency đang chờ xử lý. '}
+                    Yêu cầu của bạn sẽ được Admin xét duyệt trong vòng 1-3 ngày làm việc.
+                    Bạn sẽ nhận được thông báo khi yêu cầu được xử lý.
+                  </p>
+                  <Button
+                    variant="default"
+                    size="lg"
+                    onClick={() => navigate('/')}
+                  >
+                    Quay về trang chủ
                   </Button>
                 </div>
               </CardContent>
@@ -457,17 +524,6 @@ const RegisterAgency = () => {
                       </div>
                     </div>
                   </div>
-
-                  {/* Hiển thị thông báo pending nếu có */}
-                  {pendingMessage && (
-                    <div className="reg-agency-pending-alert">
-                      <div className="reg-agency-pending-alert-icon">ℹ️</div>
-                      <div className="reg-agency-pending-alert-content">
-                        <strong>Thông báo</strong>
-                        <p>{pendingMessage}</p>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Hiển thị lỗi submit nếu có */}
                   {errors.submit && (

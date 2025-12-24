@@ -13,6 +13,58 @@
   overflow: visible !important;
 }
 
+/* Summary Cards */
+.revenue-mgr-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.revenue-mgr-summary-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.25rem;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.revenue-mgr-summary-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.revenue-mgr-summary-card h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.revenue-mgr-amount {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.revenue-mgr-summary-card.total .revenue-mgr-amount {
+  color: #10b981;
+}
+
+.revenue-mgr-summary-card.tourist .revenue-mgr-amount {
+  color: #3b82f6;
+}
+
+.revenue-mgr-summary-card.agency .revenue-mgr-amount {
+  color: #10b981;
+}
+
+.revenue-mgr-note {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
 .revenue-mgr-revenue-stats-section {
   margin-bottom: var(--spacing-xl);
 }
@@ -153,6 +205,10 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .revenue-mgr-summary-cards {
+    grid-template-columns: 1fr;
+  }
+
   .revenue-mgr-revenue-stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }

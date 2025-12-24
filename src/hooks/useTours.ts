@@ -3,6 +3,13 @@ import axiosInstance from '~/utils/axiosInstance'
 import { API_ENDPOINTS } from '~/config/api'
 import type { ServiceComboResponse } from '~/types/serviceCombo'
 
+// Interface cho User response
+interface UserResponse {
+  Id: number
+  IS_BANNED: boolean
+  IsActive?: boolean
+}
+
 export const useTours = () => {
   const [tours, setTours] = useState<ServiceComboResponse[]>([])
   const [loading, setLoading] = useState(true)
@@ -32,7 +39,39 @@ export const useTours = () => {
       if (response.data && Array.isArray(response.data)) {
         if (response.data.length > 0) {
           console.log(`✅ [useTours] Tìm thấy ${response.data.length} service combo(s)`)
-          setTours(response.data)
+          
+          // Lấy danh sách unique HostIds
+          const hostIds = [...new Set(response.data.map((combo: ServiceComboResponse) => combo.HostId))]
+          console.log(`🔍 [useTours] Kiểm tra trạng thái của ${hostIds.length} Host(s)`)
+          
+          // Fetch thông tin các Host để kiểm tra trạng thái bị khóa
+          const bannedHostIds = new Set<number>()
+          
+          await Promise.all(
+            hostIds.map(async (hostId) => {
+              try {
+                const userResponse = await axiosInstance.get(`${API_ENDPOINTS.USER}/${hostId}`)
+                const userData: UserResponse = userResponse.data
+                // Kiểm tra nếu Host bị khóa (IS_BANNED = true hoặc IsActive = false)
+                if (userData.IS_BANNED === true || userData.IsActive === false) {
+                  bannedHostIds.add(hostId)
+                  console.log(`🚫 [useTours] Host ${hostId} bị khóa - ẩn dịch vụ`)
+                }
+              } catch (err) {
+                // Nếu không lấy được thông tin Host, vẫn hiển thị dịch vụ
+                console.warn(`⚠️ [useTours] Không thể kiểm tra trạng thái Host ${hostId}:`, err)
+              }
+            })
+          )
+          
+          // Filter ra các ServiceCombo của Host không bị khóa
+          const filteredCombos = response.data.filter(
+            (combo: ServiceComboResponse) => !bannedHostIds.has(combo.HostId)
+          )
+          
+          console.log(`✅ [useTours] Sau khi lọc Host bị khóa: ${filteredCombos.length}/${response.data.length} service combo(s)`)
+          
+          setTours(filteredCombos)
           setError(null)
         } else {
           console.warn('⚠️ [useTours] API trả về mảng rỗng - không có service combo nào')
